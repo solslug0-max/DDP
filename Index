@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plataforma DDP - Sistema Conectado a Google Sheets</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .loading-spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .sync-indicator { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .glass-effect { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+        .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.875rem; font-weight: 600; }
+        .project-card { transition: all 0.3s ease; cursor: pointer; }
+        .project-card:hover { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo } = React;
+
+        // ============================================
+        // CONFIGURACIÓN DE LA APLICACIÓN
+        // ============================================
+        
+        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwc-SL2gOt7TSpuOeZ2nl6YJdE3P7awBPkWOf5BjE6ptJIFIrxhcW7Q2Kj7F8rTA8jujA/exec';
+        
+        const ESTADOS = {
+            CREADO: { label: "CREADO", color: "bg-gray-500", code: "10" },
+            EN_PROCESO: { label: "EN PROCESO", color: "bg-blue-500", code: "50" },
+            RESPUESTA_COMERCIAL: { label: "RESPUESTA COMERCIAL", color: "bg-yellow-500", code: "70" },
+            FINALIZADO: { label: "FINALIZADO", color: "bg-green-500", code: "80" },
+            ANULADO: { label: "ANULADO", color: "bg-red-500", code: "90" }
+        };
+
+        const PROCESOS = ["ficha tecnica", "Tejido", "Hoja de costo", "Acabado", "Recepción", "Muestras", "Aprobación cliente"];
+
+        // ============================================
+        // SERVICIOS API (MÉTODO "SOLO POST")
+        // ============================================
+        
+        class GoogleSheetsAPI {
+            constructor(baseUrl) {
+                this.baseUrl = baseUrl;
+                this.isConfigured = baseUrl && baseUrl !== '';
+            }
+
+            checkConfiguration() {
+                if (!this.isConfigured) {
+                    throw new Error('URL de Apps Script no configurada');
+                }
+            }
+
+            // ¡¡GRAN CAMBIO AQUÍ!!
+            // La función 'get' ahora es una petición POST.
+            // Esto evita todos los problemas de CORS de doGet.
+            async get(action, params = {}) {
+                this.checkConfiguration();
+                
+                try {
+                    const response = await fetch(this.baseUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        // Enviamos la acción y los parámetros en el body
+                        body: JSON.stringify({ 
+                            action: action, 
+                            ...params 
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Error HTTP: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    
+                    return data;
+                } catch (error) {
+                    console.error('Error en API (GET-via-POST):', error);
+                    if (error.message.includes('Failed to fetch')) {
+                        throw new Error('Error de conexión. Verifica la URL y la implementación.');
+                    }
+                    throw error;
+                }
+            }
+
+            // La función POST sigue igual (¡siempre funcionó!)
+            async post(data) {
+                this.checkConfiguration();
+                
+                try {
+                    const response = await fetch(this.baseUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Error HTTP: ${response.status}`);
+                    }
+                    
+                    const result = await response.json();
+                    
+                    if (result.error) {
+                        throw new Error(result.error);
+                    }
+                    
+                    if (!result.success) {
+                        throw new Error(result.message || 'Error desconocido en POST');
+                    }
+
+                    return result;
+
+                } catch (error) {
+                    console.error('Error en API (POST):', error);
+                    if (error.message.includes('Failed to fetch')) {
+                        throw new Error('Error de conexión. Verifica la URL y la implementación.');
+                    }
+                    if (error instanceof SyntaxError) {
+                        throw new Error('Respuesta inválida del servidor. Re-implementa tu script.');
+                    }
+                    throw error;
+                }
+            }
+
+            // --- Funciones de la API (sin cambios) ---
+            async getProjects() {
+                return this.get('getProjects');
+            }
+            async getProject(id) {
+                return this.get('getProject', { id: id }); // 'id' se enviará en el body
+            }
+            async createProject(projectData) {
+                return this.post({ action: 'createProject', project: projectData });
+            }
+            async updateProject(id, projectData) {
+                return this.post({ action: 'updateProject', id: id, project: projectData });
+            }
+            async deleteProject(id) {
+                return this.post({ action: 'deleteProject', id: id });
+            }
+            async updateProjectStatus(id, status) {
+                return this.post({ action: 'updateStatus', id: id, status: status });
+            }
+            async addComment(id, comment) {
+                return this.post({ action: 'addComment', id: id, comment: comment });
+            }
+            async getStats() {
+                return this.get('getStats');
+            }
+        }
+
+        const api = new GoogleSheetsAPI(GOOGLE_SCRIPT_URL);
+
+        // ============================================
+        // COMPONENTE DE NOTIFICACIÓN
+        // ============================================
+        function Notification({ message, type, onClose }) {
+            useEffect(() => {
+                const timer = setTimeout(() => onClose(), 3000);
+                return () => clearTimeout(timer);
+            }, [onClose]);
+
+            const bgColor = type === 'success' ? 'bg-green-500' : 'bg-red-500';
+            const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+
+            return (
+                <div className={`fixed top-20 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50`}
+                     style={{ animation: 'slideIn 0.3s ease' }}>
+                    <i className={`fas ${icon}`}></i>
+                    <span>{message}</span>
+                </div>
+            );
+        }
+        
+        // ============================================
+        // COMPONENTE PRINCIPAL (sin cambios)
+        // ============================================
+        
+        function App() {
+            const [projects, setProjects] = useState([]);
+            const [view, setView] = useState('dashboard');
+            const [loading, setLoading] = useState(true);
+            const [syncing, setSyncing] = useState(false);
+            const [error, setError] = useState(null);
+            const [notification, setNotification] = useState(null);
+            const [lastSync, setLastSync] = useState(null);
+            const [showModal, setShowModal] = useState(false);
+            const [selectedProject, setSelectedProject] = useState(null);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [filterCliente, setFilterCliente] = useState('');
+            const [filterEstado, setFilterEstado] = useState('');
+            const [stats, setStats] = useState(null);
+            const [configError, setConfigError] = useState(!api.isConfigured);
+
+            const showNotification = (message, type = 'info') => {
+                setNotification({ message, type });
+            };
+
+            const loadProjects = useCallback(async () => {
+                if (!api.isConfigured) {
+                    setConfigError(true);
+                    setLoading(false);
+                    return;
+                }
+                try {
+                    setSyncing(true);
+                    setError(null);
+                    
+                    const response = await api.getProjects();
+                    setProjects(response.projects || []);
+                    setLastSync(new Date());
+                    
+                    try {
+                        const statsResponse = await api.getStats();
+                        setStats(statsResponse);
+                    } catch (statsError) {
+                        console.error('Error cargando estadísticas:', statsError);
+                    }
+                    
+                    if (!loading) {
+                        showNotification('Datos sincronizados', 'success');
+                    }
+                } catch (error) {
+                    console.error('Error cargando proyectos:', error);
+                    const errorMessage = error.message || 'Error desconocido';
+                    setError(errorMessage);
+                    
+                    if (projects.length === 0) {
+                        showNotification('Error de conexión. Usando datos de demo.', 'error');
+                        setProjects([
+                            { id: 2, codigo: "50", nombre: "BASE SHORT ROSADO (DEMO)", cliente: "WOALLANCE", uso: "Camisa", estilo: "Hilo color", objetivo: "Nuevo producto", ligamento: "Oxford", hiloUrdimbre: "40/1 Cotton", hiloTrama: "20/2 Alg", pesoTeorico: "mayor a 140 gr/m2", ancho: "150", composicion: "100% CO (42 x 18 ppc)", estado: "EN PROCESO", proceso: "ficha tecnica", observaciones: "COLA DE HANDLOOM", progreso: 45 },
+                            { id: 3, codigo: "50", nombre: "BASE SHORT AZUL (DEMO)", cliente: "WOALLANCE", uso: "Pantalón", estilo: "Listados", objetivo: "Nuevo producto", ligamento: "tafetan - dobby", pesoTeorico: "mayor a 140 gr/m2", ancho: "150", composicion: "100% CO (38 x 29 ppc)", estado: "EN PROCESO", proceso: "ficha tecnica", observaciones: "COLA DE HANDLOOM", progreso: 45 }
+                        ]);
+                    }
+                } finally {
+                    setLoading(false);
+                    setSyncing(false);
+                }
+            }, [projects.length, loading]);
+
+            useEffect(() => {
+                loadProjects();
+                const interval = setInterval(loadProjects, 30000);
+                return () => clearInterval(interval);
+            }, []); // <-- Solo se ejecuta una vez
+
+            const saveProject = async (projectData) => {
+                if (!api.isConfigured) {
+                    showNotification('Error: Configura la conexión', 'error');
+                    return;
+                }
+                try {
+                    setSyncing(true);
+                    if (selectedProject) {
+                        await api.updateProject(selectedProject.id, projectData);
+                        showNotification('Proyecto actualizado', 'success');
+                    } else {
+                        await api.createProject(projectData);
+                        showNotification('Proyecto creado', 'success');
+                    }
+                    await loadProjects();
+                    setShowModal(false);
+                    setSelectedProject(null);
+                } catch (error) {
+                    console.error('Error guardando proyecto:', error);
+                    showNotification(`Error: ${error.message}`, 'error');
+                } finally {
+                    setSyncing(false);
+                }
+            };
+
+            const deleteProject = async (id) => {
+                if (!confirm('¿Está seguro de eliminar este proyecto?')) return;
+                try {
+                    setSyncing(true);
+                    await api.deleteProject(id);
+                    showNotification('Proyecto eliminado', 'success');
+                    await loadProjects();
+                } catch (error) {
+                    console.error('Error eliminando proyecto:', error);
+                    showNotification(`Error: ${error.message}`, 'error');
+                } finally {
+                    setSyncing(false);
+                }
+            };
+
+            const clientes = useMemo(() => {
+                return [...new Set(projects.map(p => p.cliente).filter(Boolean))].sort();
+            }, [projects]);
+
+            const filteredProjects = useMemo(() => {
+                return projects.filter(project => {
+                    const matchSearch = searchTerm === '' || 
+                        (project.nombre && project.nombre.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                        (project.cliente && project.cliente.toLowerCase().includes(searchTerm.toLowerCase()));
+                    const matchCliente = filterCliente === '' || project.cliente === filterCliente;
+                    const matchEstado = filterEstado === '' || project.estado === filterEstado;
+                    return matchSearch && matchCliente && matchEstado;
+                });
+            }, [projects, searchTerm, filterCliente, filterEstado]);
+
+            // --- Componentes de UI (Modal, Vistas) ---
+            // (No hay cambios aquí, son idénticos a tu última versión)
+            
+            const ConfigurationPanel = () => (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-8">
+                        <div className="text-center mb-6">
+                            <i className="fab fa-google text-6xl text-blue-500 mb-4"></i>
+                            <h2 className="text-2xl font-bold text-gray-800">Error de Configuración</h2>
+                            <p className="text-red-600 mt-2">La URL de Google Apps Script no está configurada.</p>
+                        </div>
+                        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                            <p className="text-sm text-yellow-700">
+                                Por favor, edita este archivo HTML y pega la URL de tu script en la variable <strong>GOOGLE_SCRIPT_URL</strong> en la línea 75.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const ProjectModal = () => {
+                const [formData, setFormData] = useState(selectedProject || {
+                    codigo: "50", nombre: "", cliente: "", uso: "Camisa", estilo: "Hilo color",
+                    objetivo: "Nuevo producto", ligamento: "", hiloUrdimbre: "", hiloTrama: "",
+                    pesoTeorico: "", ancho: "150", composicion: "", estado: "EN PROCESO",
+                    proceso: "ficha tecnica", observaciones: "", fechaMuestra: "", progreso: 0
+                });
+                return (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
+                                <h2 className="text-xl font-bold text-gray-800">{selectedProject ? 'Editar Proyecto' : 'Nuevo Proyecto'}</h2>
+                                <button onClick={() => {setShowModal(false); setSelectedProject(null);}} className="text-gray-500 hover:text-gray-700">
+                                    <i className="fas fa-times text-xl"></i>
+                                </button>
+                            </div>
+                            <div className="p-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="col-span-2"><h3 className="text-lg font-semibold text-gray-700 mb-3">Información Básica</h3></div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Proyecto*</label>
+                                        <input type="text" value={formData.nombre} onChange={(e) => setFormData({...formData, nombre: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Cliente*</label>
+                                        <input type="text" value={formData.cliente} onChange={(e) => setFormData({...formData, cliente: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" list="clientes-list" required />
+                                        <datalist id="clientes-list">{clientes.map(c => <option key={c} value={c} />)}</datalist>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Tipo/Uso</label>
+                                        <select value={formData.uso} onChange={(e) => setFormData({...formData, uso: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                            <option value="Camisa">Camisa</option><option value="Pantalón">Pantalón</option><option value="Tñ.Pieza">Tñ.Pieza</option><option value="PPT">PPT</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Estilo</label>
+                                        <select value={formData.estilo} onChange={(e) => setFormData({...formData, estilo: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                            <option value="Hilo color">Hilo color</option><option value="Listados">Listados</option><option value="Tñ.Pieza">Tñ.Pieza</option><option value="PPT">PPT</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Objetivo</label>
+                                        <select value={formData.objetivo} onChange={(e) => setFormData({...formData, objetivo: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                            <option value="Nuevo producto">Nuevo producto</option><option value="Nuevos colores">Nuevos colores</option><option value="consumir hilos obsoletos">Consumir hilos obsoletos</option><option value="Imitar tela importada">Imitar tela importada</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+                                        <select value={formData.estado} onChange={(e) => setFormData({...formData, estado: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                            {Object.entries(ESTADOS).map(([key, value]) => (<option key={key} value={value.label}>{value.label}</option>))}
+                                        </select>
+                                    </div>
+                                    <div className="col-span-2 mt-4"><h3 className="text-lg font-semibold text-gray-700 mb-3">Información Técnica</h3></div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Ligamento</label>
+                                        <input type="text" value={formData.ligamento} onChange={(e) => setFormData({...formData, ligamento: e.target.value})} placeholder="Oxford, Dobby..." className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Hilo Urdimbre</label>
+                                        <input type="text" value={formData.hiloUrdimbre} onChange={(e) => setFormData({...formData, hiloUrdimbre: e.target.value})} placeholder="40/1 Cotton" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Hilo Trama</label>
+                                        <input type="text" value={formData.hiloTrama} onChange={(e) => setFormData({...formData, hiloTrama: e.target.value})} placeholder="20/2 Alg" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Peso Teórico</label>
+                                        <input type="text" value={formData.pesoTeorico} onChange={(e) => setFormData({...formData, pesoTeorico: e.target.value})} placeholder="> 140 gr/m2" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Ancho (cm)</label>
+                                        <input type="text" value={formData.ancho} onChange={(e) => setFormData({...formData, ancho: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Composición</label>
+                                        <input type="text" value={formData.composicion} onChange={(e) => setFormData({...formData, composicion: e.target.value})} placeholder="100% CO" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                    <div className="col-span-2 mt-4"><h3 className="text-lg font-semibold text-gray-700 mb-3">Estado Actual</h3></div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Proceso Actual</label>
+                                        <select value={formData.proceso} onChange={(e) => setFormData({...formData, proceso: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                            {PROCESOS.map(p => (<option key={p} value={p}>{p}</option>))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de Muestra</label>
+                                        <input type="date" value={formData.fechaMuestra || ''} onChange={(e) => setFormData({...formData, fechaMuestra: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                    </div>
+                                    <div className="col-span-2">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
+                                        <textarea value={formData.observaciones} onChange={(e) => setFormData({...formData, observaciones: e.target.value})} rows="3" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                                    </div>
+                                </div>
+                                <div className="mt-6 flex justify-end gap-3">
+                                    <button onClick={() => {setShowModal(false); setSelectedProject(null);}} className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition">Cancelar</button>
+                                    <button onClick={() => saveProject(formData)} disabled={syncing || !formData.nombre || !formData.cliente} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                                        {syncing ? (<><i className="fas fa-spinner loading-spinner mr-2"></i>Guardando...</>) : (<><i className="fas fa-save mr-2"></i>Guardar</>)}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const DashboardView = () => {
+                const localStats = useMemo(() => {
+                    const total = filteredProjects.length;
+                    const byStatus = {};
+                    const byClient = {};
+                    let totalProgress = 0;
+                    filteredProjects.forEach(project => {
+                        byStatus[project.estado] = (byStatus[project.estado] || 0) + 1;
+                        byClient[project.cliente] = (byClient[project.cliente] || 0) + 1;
+                        totalProgress += project.progreso || 0;
+                    });
+                    return { total, byStatus, byClient, avgProgress: total > 0 ? Math.round(totalProgress / total) : 0 };
+                }, [filteredProjects]);
+                const displayStats = stats || localStats;
+                return (
+                    <div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <div className="flex items-center justify-between mb-2"><h3 className="text-sm font-medium text-gray-500">Total Proyectos</h3><i className="fas fa-folder text-2xl text-blue-500"></i></div>
+                                <p className="text-3xl font-bold text-gray-800">{displayStats.total}</p><p className="text-xs text-gray-600 mt-2">Activos en el sistema</p>
+                            </div>
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <div className="flex items-center justify-between mb-2"><h3 className="text-sm font-medium text-gray-500">En Proceso</h3><i className="fas fa-spinner text-2xl text-yellow-500"></i></div>
+                                <p className="text-3xl font-bold text-gray-800">{displayStats.byStatus?.['EN PROCESO'] || 0}</p><p className="text-xs text-gray-600 mt-2">Proyectos activos</p>
+                            </div>
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <div className="flex items-center justify-between mb-2"><h3 className="text-sm font-medium text-gray-500">Progreso Promedio</h3><i className="fas fa-chart-line text-2xl text-green-500"></i></div>
+                                <p className="text-3xl font-bold text-gray-800">{displayStats.avgProgress}%</p><p className="text-xs text-gray-600 mt-2">De todos los proyectos</p>
+                            </div>
+                            <div className="bg-white rounded-lg shadow p-6">
+                                <div className="flex items-center justify-between mb-2"><h3 className="text-sm font-medium text-gray-500">Clientes</h3><i className="fas fa-users text-2xl text-purple-500"></i></div>
+                                <p className="text-3xl font-bold text-gray-800">{Object.keys(displayStats.byClient || {}).length}</p><p className="text-xs text-gray-600 mt-2">Clientes activos</p>
+                            </div>
+                        </div>
+                        <div className="bg-white rounded-lg shadow p-6">
+                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Proyectos Recientes</h3>
+                            <div className="space-y-3">
+                                {filteredProjects.slice(0, 5).map(project => {
+                                    const statusConfig = Object.values(ESTADOS).find(s => s.label === project.estado);
+                                    return (
+                                        <div key={project.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition" onClick={() => {setSelectedProject(project); setShowModal(true);}}>
+                                            <div className="flex items-center space-x-3">
+                                                <div className={`w-2 h-2 rounded-full ${statusConfig?.color || 'bg-gray-500'}`}></div>
+                                                <div><p className="font-medium text-gray-800">{project.nombre}</p><p className="text-sm text-gray-600">{project.cliente}</p></div>
+                                            </div>
+                                            <div className="flex items-center space-x-4">
+                                                <div className="text-right">
+                                                    <p className="text-sm text-gray-600">{project.proceso}</p>
+                                                    <div className="flex items-center mt-1">
+                                                        <div className="w-20 bg-gray-200 rounded-full h-2 mr-2"><div className="bg-blue-500 h-2 rounded-full" style={{width: `${project.progreso || 0}%`}}></div></div>
+                                                        <span className="text-xs text-gray-600">{project.progreso || 0}%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const KanbanView = () => {
+                const columns = Object.entries(ESTADOS).map(([key, value]) => ({ id: key, title: value.label, color: value.color, projects: filteredProjects.filter(p => p.estado === value.label) }));
+                const handleDragStart = (e, project) => e.dataTransfer.setData('projectId', project.id);
+                const handleDragOver = (e) => e.preventDefault();
+                const handleDrop = async (e, newStatus) => {
+                    e.preventDefault();
+                    const projectId = e.dataTransfer.getData('projectId');
+                    if (!api.isConfigured) {
+                        showNotification('Error: Configura la conexión', 'error');
+                        return;
+                    }
+                    try {
+                        setSyncing(true);
+                        await api.updateProjectStatus(projectId, newStatus);
+                        showNotification('Estado actualizado', 'success');
+                        await loadProjects();
+                    } catch (error) {
+                        console.error('Error actualizando estado:', error);
+                        showNotification(`Error: ${error.message}`, 'error');
+                    } finally {
+                        setSyncing(false);
+                    }
+                };
+                return (
+                    <div className="flex gap-4 overflow-x-auto pb-4">
+                        {columns.map(column => (
+                            <div key={column.id} className="flex-shrink-0 w-80">
+                                <div className={`${column.color} text-white px-4 py-2 rounded-t-lg flex justify-between items-center`}>
+                                    <span className="font-semibold">{column.title}</span><span className="bg-white text-gray-800 px-2 py-1 rounded-full text-sm">{column.projects.length}</span>
+                                </div>
+                                <div className="bg-gray-50 min-h-[500px] p-3 rounded-b-lg" onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, column.title)}>
+                                    {column.projects.map(project => (
+                                        <div key={project.id} draggable onDragStart={(e) => handleDragStart(e, project)} className="project-card bg-white p-3 mb-3 rounded-lg shadow-sm hover:shadow-md" onClick={() => {setSelectedProject(project); setShowModal(true);}}>
+                                            <h4 className="font-semibold text-gray-800 text-sm mb-2">{project.nombre}</h4>
+                                            <p className="text-xs text-gray-600 mb-1"><i className="fas fa-user mr-1"></i> {project.cliente}</p>
+                                            <p className="text-xs text-gray-600 mb-2"><i className="fas fa-cog mr-1"></i> {project.proceso}</p>
+                                            <div className="w-full bg-gray-200 rounded-full h-2"><div className="bg-blue-500 h-2 rounded-full" style={{width: `${project.progreso || 0}%`}}></div></div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                );
+            };
+
+            const TableView = () => (
+                <div className="bg-white rounded-lg shadow overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-gray-50 border-b">
+                                <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proyecto</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cliente</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proceso</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progreso</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                                {filteredProjects.map(project => {
+                                    const statusConfig = Object.values(ESTADOS).find(s => s.label === project.estado);
+                                    return (
+                                        <tr key={project.id} className="hover:bg-gray-50">
+                                            <td className="px-4 py-3 text-sm text-gray-900">{project.id}</td>
+                                            <td className="px-4 py-3">
+                                                <div className="text-sm font-medium text-gray-900">{project.nombre}</div>
+                                                <div className="text-xs text-gray-500">{project.ligamento} - {project.composicion}</div>
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-900">{project.cliente}</td>
+                                            <td className="px-4 py-3 text-sm text-gray-900">{project.uso}</td>
+                                            <td className="px-4 py-3"><span className={`status-badge text-white ${statusConfig?.color || 'bg-gray-500'}`}>{project.estado}</span></td>
+                                            <td className="px-4 py-3 text-sm text-gray-900">{project.proceso}</td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center">
+                                                    <div className="w-24 bg-gray-200 rounded-full h-2 mr-2"><div className="bg-blue-500 h-2 rounded-full" style={{width: `${project.progreso || 0}%`}}></div></div>
+                                                    <span className="text-sm text-gray-600">{project.progreso || 0}%</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-sm">
+                                                <button onClick={() => {setSelectedProject(project); setShowModal(true);}} className="text-blue-600 hover:text-blue-800 mr-3"><i className="fas fa-edit"></i></button>
+                                                <button onClick={() => deleteProject(project.id)} className="text-red-600 hover:text-red-800"><i className="fas fa-trash"></i></button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+
+            // --- Renderizado Principal ---
+            
+            if (configError) {
+                return <ConfigurationPanel />;
+            }
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+                    {notification && <Notification message={notification.message} type={notification.type} onClose={() => setNotification(null)} />}
+                    <header className="bg-white shadow-sm border-b">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                            <div className="flex justify-between items-center py-4">
+                                <div className="flex items-center">
+                                    <i className="fas fa-industry text-2xl text-blue-600 mr-3"></i>
+                                    <div>
+                                        <h1 className="text-2xl font-bold text-gray-800">Plataforma DDP</h1>
+                                        <p className="text-sm text-gray-600">
+                                            Conectado a Google Sheets
+                                            {lastSync && (<span className="ml-2 text-xs">• Sincronizado: {lastSync.toLocaleTimeString()}</span>)}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center space-x-3">
+                                    {syncing && (<div className="flex items-center text-blue-600"><i className="fas fa-sync loading-spinner mr-2"></i><span className="text-sm">Sincronizando...</span></div>)}
+                                    <button onClick={loadProjects} disabled={syncing} className="bg-gray-200 text-gray-700 px-3 py-2 rounded-md hover:bg-gray-300 transition disabled:opacity-50"><i className="fas fa-sync-alt"></i></button>
+                                    <button onClick={() => {setSelectedProject(null); setShowModal(true);}} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition flex items-center"><i className="fas fa-plus mr-2"></i>Nuevo Proyecto</button>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="bg-white border-b">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                            <div className="flex space-x-8">
+                                {[
+                                    { id: 'dashboard', label: 'Dashboard', icon: 'fas fa-chart-pie' },
+                                    { id: 'kanban', label: 'Kanban', icon: 'fas fa-columns' },
+                                    { id: 'table', label: 'Tabla', icon: 'fas fa-table' }
+                                ].map(tab => (
+                                    <button key={tab.id} onClick={() => setView(tab.id)}
+                                        className={`py-3 px-1 border-b-2 font-medium text-sm transition ${view === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                                        <i className={`${tab.icon} mr-2`}></i>{tab.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                        <div className="bg-white rounded-lg shadow p-4">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Buscar</label>
+                                    <div className="relative">
+                                        <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Buscar proyecto..." className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <i className="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
+                                    <select value={filterCliente} onChange={(e) => setFilterCliente(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                        <option value="">Todos los clientes</option>
+                                        {clientes.map(c => (<option key={c} value={c}>{c}</option>))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+                                    <select value={filterEstado} onChange={(e) => setFilterEstado(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                        <option value="">Todos los estados</option>
+                                        {Object.entries(ESTADOS).map(([key, value]) => (<option key={key} value={value.label}>{value.label}</option>))}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {error && (
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-4">
+                            <div className="bg-red-50 border-l-4 border-red-400 p-4">
+                                <p className="text-sm text-red-700"><i className="fas fa-exclamation-triangle mr-2"></i>{error}</p>
+                            </div>
+                        </div>
+                    )}
+
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+                        {loading ? (
+                            <div className="flex justify-center items-center h-64">
+                                <div className="text-center">
+                                    <i className="fas fa-spinner loading-spinner text-4xl text-blue-600 mb-4"></i>
+                                    <p className="text-gray-600">Cargando proyectos...</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                {view === 'dashboard' && <DashboardView />}
+                                {view === 'kanban' && <KanbanView />}
+                                {view === 'table' && <TableView />}
+                            </>
+                        )}
+                    </main>
+
+                    {showModal && <ProjectModal />}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
