@@ -31,6 +31,7 @@
         // CONFIGURACIÓN DE LA APLICACIÓN
         // ============================================
         
+        // ¡¡RECUERDA PEGAR TU URL DE IMPLEMENTACIÓN AQUÍ!!
         const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz6D74xDE3CVKzpm1sBlGF1frsEfPjRIyEc0PzGx_CYI2xyyuJf-IQyL_p4xmGcRIsVYQ/exec';
         
         const ESTADOS = {
@@ -50,7 +51,8 @@
         class GoogleSheetsAPI {
             constructor(baseUrl) {
                 this.baseUrl = baseUrl;
-                this.isConfigured = baseUrl && baseUrl !== '';
+                // Comprueba si la URL es válida (no es un string vacío o la URL de placeholder)
+                this.isConfigured = baseUrl && baseUrl !== '' && !baseUrl.includes('AKfycbz...TU_URL...exec');
             }
 
             checkConfiguration() {
@@ -59,8 +61,7 @@
                 }
             }
 
-            // ¡¡GRAN CAMBIO AQUÍ!!
-            // La función 'get' ahora es una petición POST.
+            // Esta función "get" es un POST, enviando la acción en el body.
             // Esto evita todos los problemas de CORS de doGet.
             async get(action, params = {}) {
                 this.checkConfiguration();
@@ -98,7 +99,7 @@
                 }
             }
 
-            // La función POST sigue igual (¡siempre funcionó!)
+            // La función POST real
             async post(data) {
                 this.checkConfiguration();
                 
@@ -139,7 +140,7 @@
                 }
             }
 
-            // --- Funciones de la API (sin cambios) ---
+            // --- Funciones de la API ---
             async getProjects() {
                 return this.get('getProjects');
             }
@@ -190,7 +191,7 @@
         }
         
         // ============================================
-        // COMPONENTE PRINCIPAL (sin cambios)
+        // COMPONENTE PRINCIPAL
         // ============================================
         
         function App() {
@@ -242,6 +243,7 @@
                     const errorMessage = error.message || 'Error desconocido';
                     setError(errorMessage);
                     
+                    // Fallback a datos de demo si la carga inicial falla
                     if (projects.length === 0) {
                         showNotification('Error de conexión. Usando datos de demo.', 'error');
                         setProjects([
@@ -253,13 +255,13 @@
                     setLoading(false);
                     setSyncing(false);
                 }
-            }, [projects.length, loading]);
+            }, [projects.length, loading]); // Dependencias correctas
 
             useEffect(() => {
                 loadProjects();
-                const interval = setInterval(loadProjects, 30000);
+                const interval = setInterval(loadProjects, 30000); // Sincroniza cada 30 seg
                 return () => clearInterval(interval);
-            }, []); // <-- Solo se ejecuta una vez
+            }, [loadProjects]); // Depende de la función `loadProjects`
 
             const saveProject = async (projectData) => {
                 if (!api.isConfigured) {
@@ -317,7 +319,6 @@
             }, [projects, searchTerm, filterCliente, filterEstado]);
 
             // --- Componentes de UI (Modal, Vistas) ---
-            // (No hay cambios aquí, son idénticos a tu última versión)
             
             const ConfigurationPanel = () => (
                 <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -329,7 +330,7 @@
                         </div>
                         <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
                             <p className="text-sm text-yellow-700">
-                                Por favor, edita este archivo HTML y pega la URL de tu script en la variable <strong>GOOGLE_SCRIPT_URL</strong> en la línea 75.
+                                Por favor, edita este archivo HTML y pega la URL de tu script en la variable <strong>GOOGLE_SCRIPT_URL</strong> (alrededor de la línea 78).
                             </p>
                         </div>
                     </div>
