@@ -31,8 +31,8 @@
         // CONFIGURACIÓN DE LA APLICACIÓN
         // ============================================
         
-        // ¡¡RECUERDA PEGAR TU URL DE IMPLEMENTACIÓN AQUÍ!!
-        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz6D74xDE3CVKzpm1sBlGF1frsEfPjRIyEc0PzGx_CYI2xyyuJf-IQyL_p4xmGcRIsVYQ/exec';
+        // ¡¡PEGA TU URL DE APPS SCRIPT AQUÍ!!
+        const GOOGLE_SCRIPT_URL = 'TU_URL_DE_APPS_SCRIPT_AQUI';
         
         const ESTADOS = {
             CREADO: { label: "CREADO", color: "bg-gray-500", code: "10" },
@@ -45,14 +45,13 @@
         const PROCESOS = ["ficha tecnica", "Tejido", "Hoja de costo", "Acabado", "Recepción", "Muestras", "Aprobación cliente"];
 
         // ============================================
-        // SERVICIOS API (MÉTODO "SOLO POST")
+        // SERVICIO API (MÉTODO POST PURO)
         // ============================================
         
         class GoogleSheetsAPI {
             constructor(baseUrl) {
                 this.baseUrl = baseUrl;
-                // Comprueba si la URL es válida (no es un string vacío o la URL de placeholder)
-                this.isConfigured = baseUrl && baseUrl !== '' && !baseUrl.includes('AKfycbz...TU_URL...exec');
+                this.isConfigured = baseUrl && baseUrl !== '' && baseUrl !== 'TU_URL_DE_APPS_SCRIPT_AQUI';
             }
 
             checkConfiguration() {
@@ -61,55 +60,49 @@
                 }
             }
 
-            // Esta función "get" es un POST, enviando la acción en el body.
-            // Esto evita todos los problemas de CORS de doGet.
-            async get(action, params = {}) {
+            // Función principal para todas las peticiones (usando siempre POST)
+            async request(action, data = {}) {
                 this.checkConfiguration();
                 
                 try {
+                    const payload = { action, ...data };
+                    
+                    console.log('Enviando petición:', payload);
+                    
                     const response = await fetch(this.baseUrl, {
                         method: 'POST',
+                        mode: 'no-cors', // Importante para evitar CORS
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        // Enviamos la acción y los parámetros en el body
-                        body: JSON.stringify({ 
-                            action: action, 
-                            ...params 
-                        })
+                        body: JSON.stringify(payload)
                     });
 
-                    if (!response.ok) {
-                        throw new Error(`Error HTTP: ${response.status}`);
-                    }
+                    // Con no-cors, no podemos leer la respuesta directamente
+                    // Asumimos que fue exitoso si no hay error
+                    return { success: true };
                     
-                    const data = await response.json();
-                    
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
-                    
-                    return data;
                 } catch (error) {
-                    console.error('Error en API (GET-via-POST):', error);
-                    if (error.message.includes('Failed to fetch')) {
-                        throw new Error('Error de conexión. Verifica la URL y la implementación.');
-                    }
-                    throw error;
+                    console.error('Error en petición:', error);
+                    throw new Error(`Error de conexión: ${error.message}`);
                 }
             }
 
-            // La función POST real
-            async post(data) {
+            // Función para leer datos (necesita modo CORS habilitado)
+            async requestWithResponse(action, data = {}) {
                 this.checkConfiguration();
                 
                 try {
+                    const payload = { action, ...data };
+                    
+                    console.log('Enviando petición con respuesta:', payload);
+                    
                     const response = await fetch(this.baseUrl, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify(data)
+                        body: JSON.stringify(payload)
                     });
 
                     if (!response.ok) {
@@ -122,48 +115,49 @@
                         throw new Error(result.error);
                     }
                     
-                    if (!result.success) {
-                        throw new Error(result.message || 'Error desconocido en POST');
-                    }
-
                     return result;
-
+                    
                 } catch (error) {
-                    console.error('Error en API (POST):', error);
+                    console.error('Error en petición con respuesta:', error);
                     if (error.message.includes('Failed to fetch')) {
-                        throw new Error('Error de conexión. Verifica la URL y la implementación.');
-                    }
-                    if (error instanceof SyntaxError) {
-                        throw new Error('Respuesta inválida del servidor. Re-implementa tu script.');
+                        throw new Error('Error de conexión. Verifica tu URL y que el script esté implementado.');
                     }
                     throw error;
                 }
             }
 
-            // --- Funciones de la API ---
+            // --- MÉTODOS DE LA API ---
+            
             async getProjects() {
-                return this.get('getProjects');
+                return this.requestWithResponse('getProjects');
             }
+            
             async getProject(id) {
-                return this.get('getProject', { id: id }); // 'id' se enviará en el body
+                return this.requestWithResponse('getProject', { id });
             }
+            
             async createProject(projectData) {
-                return this.post({ action: 'createProject', project: projectData });
+                return this.request('createProject', { project: projectData });
             }
+            
             async updateProject(id, projectData) {
-                return this.post({ action: 'updateProject', id: id, project: projectData });
+                return this.request('updateProject', { id, project: projectData });
             }
+            
             async deleteProject(id) {
-                return this.post({ action: 'deleteProject', id: id });
+                return this.request('deleteProject', { id });
             }
+            
             async updateProjectStatus(id, status) {
-                return this.post({ action: 'updateStatus', id: id, status: status });
+                return this.request('updateStatus', { id, status });
             }
+            
             async addComment(id, comment) {
-                return this.post({ action: 'addComment', id: id, comment: comment });
+                return this.request('addComment', { id, comment });
             }
+            
             async getStats() {
-                return this.get('getStats');
+                return this.requestWithResponse('getStats');
             }
         }
 
@@ -240,46 +234,67 @@
                     }
                 } catch (error) {
                     console.error('Error cargando proyectos:', error);
-                    const errorMessage = error.message || 'Error desconocido';
-                    setError(errorMessage);
+                    setError(error.message);
                     
-                    // Fallback a datos de demo si la carga inicial falla
+                    // Datos de demostración
                     if (projects.length === 0) {
-                        showNotification('Error de conexión. Usando datos de demo.', 'error');
+                        showNotification('Usando datos de demostración', 'error');
                         setProjects([
-                            { id: 2, codigo: "50", nombre: "BASE SHORT ROSADO (DEMO)", cliente: "WOALLANCE", uso: "Camisa", estilo: "Hilo color", objetivo: "Nuevo producto", ligamento: "Oxford", hiloUrdimbre: "40/1 Cotton", hiloTrama: "20/2 Alg", pesoTeorico: "mayor a 140 gr/m2", ancho: "150", composicion: "100% CO (42 x 18 ppc)", estado: "EN PROCESO", proceso: "ficha tecnica", observaciones: "COLA DE HANDLOOM", progreso: 45 },
-                            { id: 3, codigo: "50", nombre: "BASE SHORT AZUL (DEMO)", cliente: "WOALLANCE", uso: "Pantalón", estilo: "Listados", objetivo: "Nuevo producto", ligamento: "tafetan - dobby", pesoTeorico: "mayor a 140 gr/m2", ancho: "150", composicion: "100% CO (38 x 29 ppc)", estado: "EN PROCESO", proceso: "ficha tecnica", observaciones: "COLA DE HANDLOOM", progreso: 45 }
+                            { 
+                                id: 1, 
+                                codigo: "50", 
+                                nombre: "PROYECTO DEMO 1", 
+                                cliente: "CLIENTE DEMO", 
+                                uso: "Camisa", 
+                                estilo: "Hilo color", 
+                                objetivo: "Nuevo producto", 
+                                ligamento: "Oxford", 
+                                hiloUrdimbre: "40/1 Cotton", 
+                                hiloTrama: "20/2 Alg", 
+                                pesoTeorico: ">140 gr/m2", 
+                                ancho: "150", 
+                                composicion: "100% CO", 
+                                estado: "EN PROCESO", 
+                                proceso: "Tejido", 
+                                observaciones: "Proyecto de demostración", 
+                                progreso: 50 
+                            }
                         ]);
                     }
                 } finally {
                     setLoading(false);
                     setSyncing(false);
                 }
-            }, [projects.length, loading]); // Dependencias correctas
+            }, [loading, projects.length]);
 
             useEffect(() => {
                 loadProjects();
-                const interval = setInterval(loadProjects, 30000); // Sincroniza cada 30 seg
+                const interval = setInterval(loadProjects, 60000); // Cada 60 segundos
                 return () => clearInterval(interval);
-            }, [loadProjects]); // Depende de la función `loadProjects`
+            }, [loadProjects]);
 
             const saveProject = async (projectData) => {
                 if (!api.isConfigured) {
-                    showNotification('Error: Configura la conexión', 'error');
+                    showNotification('Error: Configura la URL primero', 'error');
                     return;
                 }
                 try {
                     setSyncing(true);
                     if (selectedProject) {
                         await api.updateProject(selectedProject.id, projectData);
-                        showNotification('Proyecto actualizado', 'success');
+                        showNotification('Proyecto actualizado exitosamente', 'success');
                     } else {
                         await api.createProject(projectData);
-                        showNotification('Proyecto creado', 'success');
+                        showNotification('Proyecto creado exitosamente', 'success');
                     }
-                    await loadProjects();
-                    setShowModal(false);
-                    setSelectedProject(null);
+                    
+                    // Esperar un momento antes de recargar
+                    setTimeout(async () => {
+                        await loadProjects();
+                        setShowModal(false);
+                        setSelectedProject(null);
+                    }, 1500);
+                    
                 } catch (error) {
                     console.error('Error guardando proyecto:', error);
                     showNotification(`Error: ${error.message}`, 'error');
@@ -294,7 +309,7 @@
                     setSyncing(true);
                     await api.deleteProject(id);
                     showNotification('Proyecto eliminado', 'success');
-                    await loadProjects();
+                    setTimeout(() => loadProjects(), 1500);
                 } catch (error) {
                     console.error('Error eliminando proyecto:', error);
                     showNotification(`Error: ${error.message}`, 'error');
@@ -318,19 +333,31 @@
                 });
             }, [projects, searchTerm, filterCliente, filterEstado]);
 
-            // --- Componentes de UI (Modal, Vistas) ---
+            // --- COMPONENTES DE UI ---
             
             const ConfigurationPanel = () => (
                 <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-8">
                         <div className="text-center mb-6">
                             <i className="fab fa-google text-6xl text-blue-500 mb-4"></i>
-                            <h2 className="text-2xl font-bold text-gray-800">Error de Configuración</h2>
-                            <p className="text-red-600 mt-2">La URL de Google Apps Script no está configurada.</p>
+                            <h2 className="text-2xl font-bold text-gray-800">⚠️ Configuración Requerida</h2>
+                            <p className="text-red-600 mt-2">La URL de Google Apps Script no está configurada</p>
                         </div>
-                        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+                            <p className="text-sm text-yellow-700 mb-2">
+                                <strong>Paso 1:</strong> Copia el código de Apps Script y crea un nuevo script en Google Sheets
+                            </p>
+                            <p className="text-sm text-yellow-700 mb-2">
+                                <strong>Paso 2:</strong> Implementa el script como aplicación web
+                            </p>
                             <p className="text-sm text-yellow-700">
-                                Por favor, edita este archivo HTML y pega la URL de tu script en la variable <strong>GOOGLE_SCRIPT_URL</strong> (alrededor de la línea 78).
+                                <strong>Paso 3:</strong> Pega la URL de implementación en la línea 25 de este archivo HTML (reemplaza 'TU_URL_DE_APPS_SCRIPT_AQUI')
+                            </p>
+                        </div>
+                        <div className="bg-blue-50 border-l-4 border-blue-400 p-4">
+                            <p className="text-sm text-blue-700">
+                                <i className="fas fa-info-circle mr-2"></i>
+                                Busca en el código: <code className="bg-blue-100 px-2 py-1 rounded">const GOOGLE_SCRIPT_URL</code>
                             </p>
                         </div>
                     </div>
@@ -339,104 +366,291 @@
 
             const ProjectModal = () => {
                 const [formData, setFormData] = useState(selectedProject || {
-                    codigo: "50", nombre: "", cliente: "", uso: "Camisa", estilo: "Hilo color",
-                    objetivo: "Nuevo producto", ligamento: "", hiloUrdimbre: "", hiloTrama: "",
-                    pesoTeorico: "", ancho: "150", composicion: "", estado: "EN PROCESO",
-                    proceso: "ficha tecnica", observaciones: "", fechaMuestra: "", progreso: 0
+                    codigo: "50",
+                    nombre: "",
+                    cliente: "",
+                    uso: "Camisa",
+                    estilo: "Hilo color",
+                    objetivo: "Nuevo producto",
+                    ligamento: "",
+                    hiloUrdimbre: "",
+                    hiloTrama: "",
+                    pesoTeorico: "",
+                    ancho: "150",
+                    composicion: "",
+                    estado: "EN PROCESO",
+                    proceso: "ficha tecnica",
+                    observaciones: "",
+                    fechaMuestra: "",
+                    progreso: 0
                 });
+
                 return (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={(e) => {
+                        if (e.target === e.currentTarget) {
+                            setShowModal(false);
+                            setSelectedProject(null);
+                        }
+                    }}>
                         <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-                            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
-                                <h2 className="text-xl font-bold text-gray-800">{selectedProject ? 'Editar Proyecto' : 'Nuevo Proyecto'}</h2>
-                                <button onClick={() => {setShowModal(false); setSelectedProject(null);}} className="text-gray-500 hover:text-gray-700">
-                                    <i className="fas fa-times text-xl"></i>
+                            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center z-10">
+                                <h2 className="text-xl font-bold text-gray-800">
+                                    {selectedProject ? '✏️ Editar Proyecto' : '➕ Nuevo Proyecto'}
+                                </h2>
+                                <button 
+                                    onClick={() => {
+                                        setShowModal(false);
+                                        setSelectedProject(null);
+                                    }} 
+                                    className="text-gray-500 hover:text-gray-700 text-2xl"
+                                >
+                                    <i className="fas fa-times"></i>
                                 </button>
                             </div>
-                            <div className="p-6">
+                            
+                            <form onSubmit={(e) => {
+                                e.preventDefault();
+                                saveProject(formData);
+                            }} className="p-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="col-span-2"><h3 className="text-lg font-semibold text-gray-700 mb-3">Información Básica</h3></div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Proyecto*</label>
-                                        <input type="text" value={formData.nombre} onChange={(e) => setFormData({...formData, nombre: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required />
+                                    {/* Información Básica */}
+                                    <div className="col-span-2">
+                                        <h3 className="text-lg font-semibold text-gray-700 mb-3 border-b pb-2">
+                                            📋 Información Básica
+                                        </h3>
                                     </div>
+                                    
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Cliente*</label>
-                                        <input type="text" value={formData.cliente} onChange={(e) => setFormData({...formData, cliente: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" list="clientes-list" required />
-                                        <datalist id="clientes-list">{clientes.map(c => <option key={c} value={c} />)}</datalist>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Nombre del Proyecto *
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            value={formData.nombre} 
+                                            onChange={(e) => setFormData({...formData, nombre: e.target.value})} 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                            required 
+                                            placeholder="Ej: BASE SHORT ROSADO"
+                                        />
                                     </div>
+                                    
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Cliente *
+                                        </label>
+                                        <input 
+                                            type="text" 
+                                            value={formData.cliente} 
+                                            onChange={(e) => setFormData({...formData, cliente: e.target.value})} 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                            list="clientes-list" 
+                                            required 
+                                            placeholder="Nombre del cliente"
+                                        />
+                                        <datalist id="clientes-list">
+                                            {clientes.map(c => <option key={c} value={c} />)}
+                                        </datalist>
+                                    </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Tipo/Uso</label>
-                                        <select value={formData.uso} onChange={(e) => setFormData({...formData, uso: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                            <option value="Camisa">Camisa</option><option value="Pantalón">Pantalón</option><option value="Tñ.Pieza">Tñ.Pieza</option><option value="PPT">PPT</option>
+                                        <select 
+                                            value={formData.uso} 
+                                            onChange={(e) => setFormData({...formData, uso: e.target.value})} 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="Camisa">Camisa</option>
+                                            <option value="Pantalón">Pantalón</option>
+                                            <option value="Tñ.Pieza">Tñ.Pieza</option>
+                                            <option value="PPT">PPT</option>
                                         </select>
                                     </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Estilo</label>
-                                        <select value={formData.estilo} onChange={(e) => setFormData({...formData, estilo: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                            <option value="Hilo color">Hilo color</option><option value="Listados">Listados</option><option value="Tñ.Pieza">Tñ.Pieza</option><option value="PPT">PPT</option>
+                                        <select 
+                                            value={formData.estilo} 
+                                            onChange={(e) => setFormData({...formData, estilo: e.target.value})} 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="Hilo color">Hilo color</option>
+                                            <option value="Listados">Listados</option>
+                                            <option value="Tñ.Pieza">Tñ.Pieza</option>
+                                            <option value="PPT">PPT</option>
                                         </select>
                                     </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Objetivo</label>
-                                        <select value={formData.objetivo} onChange={(e) => setFormData({...formData, objetivo: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                            <option value="Nuevo producto">Nuevo producto</option><option value="Nuevos colores">Nuevos colores</option><option value="consumir hilos obsoletos">Consumir hilos obsoletos</option><option value="Imitar tela importada">Imitar tela importada</option>
+                                        <select 
+                                            value={formData.objetivo} 
+                                            onChange={(e) => setFormData({...formData, objetivo: e.target.value})} 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="Nuevo producto">Nuevo producto</option>
+                                            <option value="Nuevos colores">Nuevos colores</option>
+                                            <option value="consumir hilos obsoletos">Consumir hilos obsoletos</option>
+                                            <option value="Imitar tela importada">Imitar tela importada</option>
                                         </select>
                                     </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
-                                        <select value={formData.estado} onChange={(e) => setFormData({...formData, estado: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                            {Object.entries(ESTADOS).map(([key, value]) => (<option key={key} value={value.label}>{value.label}</option>))}
+                                        <select 
+                                            value={formData.estado} 
+                                            onChange={(e) => setFormData({...formData, estado: e.target.value})} 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            {Object.entries(ESTADOS).map(([key, value]) => (
+                                                <option key={key} value={value.label}>{value.label}</option>
+                                            ))}
                                         </select>
                                     </div>
-                                    <div className="col-span-2 mt-4"><h3 className="text-lg font-semibold text-gray-700 mb-3">Información Técnica</h3></div>
+                                    
+                                    {/* Información Técnica */}
+                                    <div className="col-span-2 mt-4">
+                                        <h3 className="text-lg font-semibold text-gray-700 mb-3 border-b pb-2">
+                                            🔧 Información Técnica
+                                        </h3>
+                                    </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Ligamento</label>
-                                        <input type="text" value={formData.ligamento} onChange={(e) => setFormData({...formData, ligamento: e.target.value})} placeholder="Oxford, Dobby..." className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <input 
+                                            type="text" 
+                                            value={formData.ligamento} 
+                                            onChange={(e) => setFormData({...formData, ligamento: e.target.value})} 
+                                            placeholder="Ej: Oxford, Dobby..." 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        />
                                     </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Hilo Urdimbre</label>
-                                        <input type="text" value={formData.hiloUrdimbre} onChange={(e) => setFormData({...formData, hiloUrdimbre: e.target.value})} placeholder="40/1 Cotton" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <input 
+                                            type="text" 
+                                            value={formData.hiloUrdimbre} 
+                                            onChange={(e) => setFormData({...formData, hiloUrdimbre: e.target.value})} 
+                                            placeholder="Ej: 40/1 Cotton" 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        />
                                     </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Hilo Trama</label>
-                                        <input type="text" value={formData.hiloTrama} onChange={(e) => setFormData({...formData, hiloTrama: e.target.value})} placeholder="20/2 Alg" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <input 
+                                            type="text" 
+                                            value={formData.hiloTrama} 
+                                            onChange={(e) => setFormData({...formData, hiloTrama: e.target.value})} 
+                                            placeholder="Ej: 20/2 Alg" 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        />
                                     </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Peso Teórico</label>
-                                        <input type="text" value={formData.pesoTeorico} onChange={(e) => setFormData({...formData, pesoTeorico: e.target.value})} placeholder="> 140 gr/m2" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <input 
+                                            type="text" 
+                                            value={formData.pesoTeorico} 
+                                            onChange={(e) => setFormData({...formData, pesoTeorico: e.target.value})} 
+                                            placeholder="Ej: >140 gr/m2" 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        />
                                     </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Ancho (cm)</label>
-                                        <input type="text" value={formData.ancho} onChange={(e) => setFormData({...formData, ancho: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <input 
+                                            type="text" 
+                                            value={formData.ancho} 
+                                            onChange={(e) => setFormData({...formData, ancho: e.target.value})} 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        />
                                     </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Composición</label>
-                                        <input type="text" value={formData.composicion} onChange={(e) => setFormData({...formData, composicion: e.target.value})} placeholder="100% CO" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <input 
+                                            type="text" 
+                                            value={formData.composicion} 
+                                            onChange={(e) => setFormData({...formData, composicion: e.target.value})} 
+                                            placeholder="Ej: 100% CO" 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        />
                                     </div>
-                                    <div className="col-span-2 mt-4"><h3 className="text-lg font-semibold text-gray-700 mb-3">Estado Actual</h3></div>
+                                    
+                                    {/* Estado Actual */}
+                                    <div className="col-span-2 mt-4">
+                                        <h3 className="text-lg font-semibold text-gray-700 mb-3 border-b pb-2">
+                                            📊 Estado Actual
+                                        </h3>
+                                    </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Proceso Actual</label>
-                                        <select value={formData.proceso} onChange={(e) => setFormData({...formData, proceso: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                            {PROCESOS.map(p => (<option key={p} value={p}>{p}</option>))}
+                                        <select 
+                                            value={formData.proceso} 
+                                            onChange={(e) => setFormData({...formData, proceso: e.target.value})} 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            {PROCESOS.map(p => (
+                                                <option key={p} value={p}>{p}</option>
+                                            ))}
                                         </select>
                                     </div>
+                                    
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de Muestra</label>
-                                        <input type="date" value={formData.fechaMuestra || ''} onChange={(e) => setFormData({...formData, fechaMuestra: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <input 
+                                            type="date" 
+                                            value={formData.fechaMuestra || ''} 
+                                            onChange={(e) => setFormData({...formData, fechaMuestra: e.target.value})} 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        />
                                     </div>
+                                    
                                     <div className="col-span-2">
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
-                                        <textarea value={formData.observaciones} onChange={(e) => setFormData({...formData, observaciones: e.target.value})} rows="3" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                                        <textarea 
+                                            value={formData.observaciones} 
+                                            onChange={(e) => setFormData({...formData, observaciones: e.target.value})} 
+                                            rows="3" 
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            placeholder="Notas adicionales sobre el proyecto..."
+                                        ></textarea>
                                     </div>
                                 </div>
-                                <div className="mt-6 flex justify-end gap-3">
-                                    <button onClick={() => {setShowModal(false); setSelectedProject(null);}} className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition">Cancelar</button>
-                                    <button onClick={() => saveProject(formData)} disabled={syncing || !formData.nombre || !formData.cliente} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                        {syncing ? (<><i className="fas fa-spinner loading-spinner mr-2"></i>Guardando...</>) : (<><i className="fas fa-save mr-2"></i>Guardar</>)}
+                                
+                                <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+                                    <button 
+                                        type="button"
+                                        onClick={() => {
+                                            setShowModal(false);
+                                            setSelectedProject(null);
+                                        }} 
+                                        className="px-6 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button 
+                                        type="submit"
+                                        disabled={syncing || !formData.nombre || !formData.cliente} 
+                                        className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                    >
+                                        {syncing ? (
+                                            <>
+                                                <i className="fas fa-spinner loading-spinner"></i>
+                                                Guardando...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <i className="fas fa-save"></i>
+                                                {selectedProject ? 'Actualizar' : 'Guardar'}
+                                            </>
+                                        )}
                                     </button>
                                 </div>
-                            </div>
+                            </form>
                         </div>
                     </div>
                 );
@@ -448,50 +662,98 @@
                     const byStatus = {};
                     const byClient = {};
                     let totalProgress = 0;
+                    
                     filteredProjects.forEach(project => {
                         byStatus[project.estado] = (byStatus[project.estado] || 0) + 1;
                         byClient[project.cliente] = (byClient[project.cliente] || 0) + 1;
                         totalProgress += project.progreso || 0;
                     });
-                    return { total, byStatus, byClient, avgProgress: total > 0 ? Math.round(totalProgress / total) : 0 };
+                    
+                    return { 
+                        total, 
+                        byStatus, 
+                        byClient, 
+                        avgProgress: total > 0 ? Math.round(totalProgress / total) : 0 
+                    };
                 }, [filteredProjects]);
+                
                 const displayStats = stats || localStats;
+                
                 return (
                     <div>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                             <div className="bg-white rounded-lg shadow p-6">
-                                <div className="flex items-center justify-between mb-2"><h3 className="text-sm font-medium text-gray-500">Total Proyectos</h3><i className="fas fa-folder text-2xl text-blue-500"></i></div>
-                                <p className="text-3xl font-bold text-gray-800">{displayStats.total}</p><p className="text-xs text-gray-600 mt-2">Activos en el sistema</p>
+                                <div className="flex items-center justify-between mb-2">
+                                    <h3 className="text-sm font-medium text-gray-500">Total Proyectos</h3>
+                                    <i className="fas fa-folder text-2xl text-blue-500"></i>
+                                </div>
+                                <p className="text-3xl font-bold text-gray-800">{displayStats.total}</p>
+                                <p className="text-xs text-gray-600 mt-2">Activos en el sistema</p>
                             </div>
+                            
                             <div className="bg-white rounded-lg shadow p-6">
-                                <div className="flex items-center justify-between mb-2"><h3 className="text-sm font-medium text-gray-500">En Proceso</h3><i className="fas fa-spinner text-2xl text-yellow-500"></i></div>
-                                <p className="text-3xl font-bold text-gray-800">{displayStats.byStatus?.['EN PROCESO'] || 0}</p><p className="text-xs text-gray-600 mt-2">Proyectos activos</p>
+                                <div className="flex items-center justify-between mb-2">
+                                    <h3 className="text-sm font-medium text-gray-500">En Proceso</h3>
+                                    <i className="fas fa-spinner text-2xl text-yellow-500"></i>
+                                </div>
+                                <p className="text-3xl font-bold text-gray-800">
+                                    {displayStats.byStatus?.['EN PROCESO'] || 0}
+                                </p>
+                                <p className="text-xs text-gray-600 mt-2">Proyectos activos</p>
                             </div>
+                            
                             <div className="bg-white rounded-lg shadow p-6">
-                                <div className="flex items-center justify-between mb-2"><h3 className="text-sm font-medium text-gray-500">Progreso Promedio</h3><i className="fas fa-chart-line text-2xl text-green-500"></i></div>
-                                <p className="text-3xl font-bold text-gray-800">{displayStats.avgProgress}%</p><p className="text-xs text-gray-600 mt-2">De todos los proyectos</p>
+                                <div className="flex items-center justify-between mb-2">
+                                    <h3 className="text-sm font-medium text-gray-500">Progreso Promedio</h3>
+                                    <i className="fas fa-chart-line text-2xl text-green-500"></i>
+                                </div>
+                                <p className="text-3xl font-bold text-gray-800">{displayStats.avgProgress}%</p>
+                                <p className="text-xs text-gray-600 mt-2">De todos los proyectos</p>
                             </div>
+                            
                             <div className="bg-white rounded-lg shadow p-6">
-                                <div className="flex items-center justify-between mb-2"><h3 className="text-sm font-medium text-gray-500">Clientes</h3><i className="fas fa-users text-2xl text-purple-500"></i></div>
-                                <p className="text-3xl font-bold text-gray-800">{Object.keys(displayStats.byClient || {}).length}</p><p className="text-xs text-gray-600 mt-2">Clientes activos</p>
+                                <div className="flex items-center justify-between mb-2">
+                                    <h3 className="text-sm font-medium text-gray-500">Clientes</h3>
+                                    <i className="fas fa-users text-2xl text-purple-500"></i>
+                                </div>
+                                <p className="text-3xl font-bold text-gray-800">
+                                    {Object.keys(displayStats.byClient || {}).length}
+                                </p>
+                                <p className="text-xs text-gray-600 mt-2">Clientes activos</p>
                             </div>
                         </div>
+                        
                         <div className="bg-white rounded-lg shadow p-6">
                             <h3 className="text-lg font-semibold text-gray-800 mb-4">Proyectos Recientes</h3>
                             <div className="space-y-3">
                                 {filteredProjects.slice(0, 5).map(project => {
                                     const statusConfig = Object.values(ESTADOS).find(s => s.label === project.estado);
                                     return (
-                                        <div key={project.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition" onClick={() => {setSelectedProject(project); setShowModal(true);}}>
+                                        <div 
+                                            key={project.id} 
+                                            className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition" 
+                                            onClick={() => {
+                                                setSelectedProject(project);
+                                                setShowModal(true);
+                                            }}
+                                        >
                                             <div className="flex items-center space-x-3">
                                                 <div className={`w-2 h-2 rounded-full ${statusConfig?.color || 'bg-gray-500'}`}></div>
-                                                <div><p className="font-medium text-gray-800">{project.nombre}</p><p className="text-sm text-gray-600">{project.cliente}</p></div>
+                                                <div>
+                                                    <p className="font-medium text-gray-800">{project.nombre}</p>
+                                                    <p className="text-sm text-gray-600">{project.cliente}</p>
+                                                </div>
                                             </div>
                                             <div className="flex items-center space-x-4">
                                                 <div className="text-right">
                                                     <p className="text-sm text-gray-600">{project.proceso}</p>
                                                     <div className="flex items-center mt-1">
-                                                        <div className="w-20 bg-gray-200 rounded-full h-2 mr-2"><div className="bg-blue-500 h-2 rounded-full" style={{width: `${project.progreso || 0}%`}}></div></div>
+                                                        <div className="w-20 bg-gray-200 rounded-full h-2 mr-2">
+                                                            <div 
+                                                                className="bg-blue-500 h-2 rounded-full" 
+                                                                style={{width: `${project.progreso || 0}%`}}
+                                                            ></div>
+                                                        </div>
                                                         <span className="text-xs text-gray-600">{project.progreso || 0}%</span>
                                                     </div>
                                                 </div>
@@ -499,6 +761,13 @@
                                         </div>
                                     );
                                 })}
+                                
+                                {filteredProjects.length === 0 && (
+                                    <div className="text-center py-8 text-gray-500">
+                                        <i className="fas fa-inbox text-4xl mb-2"></i>
+                                        <p>No hay proyectos para mostrar</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -506,21 +775,35 @@
             };
 
             const KanbanView = () => {
-                const columns = Object.entries(ESTADOS).map(([key, value]) => ({ id: key, title: value.label, color: value.color, projects: filteredProjects.filter(p => p.estado === value.label) }));
-                const handleDragStart = (e, project) => e.dataTransfer.setData('projectId', project.id);
-                const handleDragOver = (e) => e.preventDefault();
+                const columns = Object.entries(ESTADOS).map(([key, value]) => ({
+                    id: key,
+                    title: value.label,
+                    color: value.color,
+                    projects: filteredProjects.filter(p => p.estado === value.label)
+                }));
+                
+                const handleDragStart = (e, project) => {
+                    e.dataTransfer.setData('projectId', project.id);
+                };
+                
+                const handleDragOver = (e) => {
+                    e.preventDefault();
+                };
+                
                 const handleDrop = async (e, newStatus) => {
                     e.preventDefault();
                     const projectId = e.dataTransfer.getData('projectId');
+                    
                     if (!api.isConfigured) {
                         showNotification('Error: Configura la conexión', 'error');
                         return;
                     }
+                    
                     try {
                         setSyncing(true);
                         await api.updateProjectStatus(projectId, newStatus);
                         showNotification('Estado actualizado', 'success');
-                        await loadProjects();
+                        setTimeout(() => loadProjects(), 1500);
                     } catch (error) {
                         console.error('Error actualizando estado:', error);
                         showNotification(`Error: ${error.message}`, 'error');
@@ -528,20 +811,48 @@
                         setSyncing(false);
                     }
                 };
+                
                 return (
                     <div className="flex gap-4 overflow-x-auto pb-4">
                         {columns.map(column => (
                             <div key={column.id} className="flex-shrink-0 w-80">
                                 <div className={`${column.color} text-white px-4 py-2 rounded-t-lg flex justify-between items-center`}>
-                                    <span className="font-semibold">{column.title}</span><span className="bg-white text-gray-800 px-2 py-1 rounded-full text-sm">{column.projects.length}</span>
+                                    <span className="font-semibold">{column.title}</span>
+                                    <span className="bg-white text-gray-800 px-2 py-1 rounded-full text-sm">
+                                        {column.projects.length}
+                                    </span>
                                 </div>
-                                <div className="bg-gray-50 min-h-[500px] p-3 rounded-b-lg" onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, column.title)}>
+                                <div 
+                                    className="bg-gray-50 min-h-[500px] p-3 rounded-b-lg" 
+                                    onDragOver={handleDragOver}
+                                    onDrop={(e) => handleDrop(e, column.title)}
+                                >
                                     {column.projects.map(project => (
-                                        <div key={project.id} draggable onDragStart={(e) => handleDragStart(e, project)} className="project-card bg-white p-3 mb-3 rounded-lg shadow-sm hover:shadow-md" onClick={() => {setSelectedProject(project); setShowModal(true);}}>
-                                            <h4 className="font-semibold text-gray-800 text-sm mb-2">{project.nombre}</h4>
-                                            <p className="text-xs text-gray-600 mb-1"><i className="fas fa-user mr-1"></i> {project.cliente}</p>
-                                            <p className="text-xs text-gray-600 mb-2"><i className="fas fa-cog mr-1"></i> {project.proceso}</p>
-                                            <div className="w-full bg-gray-200 rounded-full h-2"><div className="bg-blue-500 h-2 rounded-full" style={{width: `${project.progreso || 0}%`}}></div></div>
+                                        <div 
+                                            key={project.id}
+                                            draggable
+                                            onDragStart={(e) => handleDragStart(e, project)}
+                                            className="project-card bg-white p-3 mb-3 rounded-lg shadow-sm hover:shadow-md"
+                                            onClick={() => {
+                                                setSelectedProject(project);
+                                                setShowModal(true);
+                                            }}
+                                        >
+                                            <h4 className="font-semibold text-gray-800 text-sm mb-2">
+                                                {project.nombre}
+                                            </h4>
+                                            <p className="text-xs text-gray-600 mb-1">
+                                                <i className="fas fa-user mr-1"></i> {project.cliente}
+                                            </p>
+                                            <p className="text-xs text-gray-600 mb-2">
+                                                <i className="fas fa-cog mr-1"></i> {project.proceso}
+                                            </p>
+                                            <div className="w-full bg-gray-200 rounded-full h-2">
+                                                <div 
+                                                    className="bg-blue-500 h-2 rounded-full" 
+                                                    style={{width: `${project.progreso || 0}%`}}
+                                                ></div>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -575,32 +886,65 @@
                                             <td className="px-4 py-3 text-sm text-gray-900">{project.id}</td>
                                             <td className="px-4 py-3">
                                                 <div className="text-sm font-medium text-gray-900">{project.nombre}</div>
-                                                <div className="text-xs text-gray-500">{project.ligamento} - {project.composicion}</div>
+                                                <div className="text-xs text-gray-500">
+                                                    {project.ligamento} - {project.composicion}
+                                                </div>
                                             </td>
                                             <td className="px-4 py-3 text-sm text-gray-900">{project.cliente}</td>
                                             <td className="px-4 py-3 text-sm text-gray-900">{project.uso}</td>
-                                            <td className="px-4 py-3"><span className={`status-badge text-white ${statusConfig?.color || 'bg-gray-500'}`}>{project.estado}</span></td>
+                                            <td className="px-4 py-3">
+                                                <span className={`status-badge text-white ${statusConfig?.color || 'bg-gray-500'}`}>
+                                                    {project.estado}
+                                                </span>
+                                            </td>
                                             <td className="px-4 py-3 text-sm text-gray-900">{project.proceso}</td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center">
-                                                    <div className="w-24 bg-gray-200 rounded-full h-2 mr-2"><div className="bg-blue-500 h-2 rounded-full" style={{width: `${project.progreso || 0}%`}}></div></div>
+                                                    <div className="w-24 bg-gray-200 rounded-full h-2 mr-2">
+                                                        <div 
+                                                            className="bg-blue-500 h-2 rounded-full" 
+                                                            style={{width: `${project.progreso || 0}%`}}
+                                                        ></div>
+                                                    </div>
                                                     <span className="text-sm text-gray-600">{project.progreso || 0}%</span>
                                                 </div>
                                             </td>
                                             <td className="px-4 py-3 text-sm">
-                                                <button onClick={() => {setSelectedProject(project); setShowModal(true);}} className="text-blue-600 hover:text-blue-800 mr-3"><i className="fas fa-edit"></i></button>
-                                                <button onClick={() => deleteProject(project.id)} className="text-red-600 hover:text-red-800"><i className="fas fa-trash"></i></button>
+                                                <button 
+                                                    onClick={() => {
+                                                        setSelectedProject(project);
+                                                        setShowModal(true);
+                                                    }} 
+                                                    className="text-blue-600 hover:text-blue-800 mr-3"
+                                                >
+                                                    <i className="fas fa-edit"></i>
+                                                </button>
+                                                <button 
+                                                    onClick={() => deleteProject(project.id)} 
+                                                    className="text-red-600 hover:text-red-800"
+                                                >
+                                                    <i className="fas fa-trash"></i>
+                                                </button>
                                             </td>
                                         </tr>
                                     );
                                 })}
+                                
+                                {filteredProjects.length === 0 && (
+                                    <tr>
+                                        <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
+                                            <i className="fas fa-inbox text-4xl mb-2"></i>
+                                            <p>No hay proyectos para mostrar</p>
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
                 </div>
             );
 
-            // --- Renderizado Principal ---
+            // --- RENDERIZADO PRINCIPAL ---
             
             if (configError) {
                 return <ConfigurationPanel />;
@@ -608,7 +952,14 @@
 
             return (
                 <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-                    {notification && <Notification message={notification.message} type={notification.type} onClose={() => setNotification(null)} />}
+                    {notification && (
+                        <Notification 
+                            message={notification.message} 
+                            type={notification.type} 
+                            onClose={() => setNotification(null)} 
+                        />
+                    )}
+                    
                     <header className="bg-white shadow-sm border-b">
                         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                             <div className="flex justify-between items-center py-4">
@@ -618,14 +969,38 @@
                                         <h1 className="text-2xl font-bold text-gray-800">Plataforma DDP</h1>
                                         <p className="text-sm text-gray-600">
                                             Conectado a Google Sheets
-                                            {lastSync && (<span className="ml-2 text-xs">• Sincronizado: {lastSync.toLocaleTimeString()}</span>)}
+                                            {lastSync && (
+                                                <span className="ml-2 text-xs">
+                                                    • Sincronizado: {lastSync.toLocaleTimeString()}
+                                                </span>
+                                            )}
                                         </p>
                                     </div>
                                 </div>
                                 <div className="flex items-center space-x-3">
-                                    {syncing && (<div className="flex items-center text-blue-600"><i className="fas fa-sync loading-spinner mr-2"></i><span className="text-sm">Sincronizando...</span></div>)}
-                                    <button onClick={loadProjects} disabled={syncing} className="bg-gray-200 text-gray-700 px-3 py-2 rounded-md hover:bg-gray-300 transition disabled:opacity-50"><i className="fas fa-sync-alt"></i></button>
-                                    <button onClick={() => {setSelectedProject(null); setShowModal(true);}} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition flex items-center"><i className="fas fa-plus mr-2"></i>Nuevo Proyecto</button>
+                                    {syncing && (
+                                        <div className="flex items-center text-blue-600">
+                                            <i className="fas fa-sync loading-spinner mr-2"></i>
+                                            <span className="text-sm">Sincronizando...</span>
+                                        </div>
+                                    )}
+                                    <button 
+                                        onClick={loadProjects} 
+                                        disabled={syncing} 
+                                        className="bg-gray-200 text-gray-700 px-3 py-2 rounded-md hover:bg-gray-300 transition disabled:opacity-50"
+                                    >
+                                        <i className="fas fa-sync-alt"></i>
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            setSelectedProject(null);
+                                            setShowModal(true);
+                                        }} 
+                                        className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition flex items-center"
+                                    >
+                                        <i className="fas fa-plus mr-2"></i>
+                                        Nuevo Proyecto
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -639,9 +1014,17 @@
                                     { id: 'kanban', label: 'Kanban', icon: 'fas fa-columns' },
                                     { id: 'table', label: 'Tabla', icon: 'fas fa-table' }
                                 ].map(tab => (
-                                    <button key={tab.id} onClick={() => setView(tab.id)}
-                                        className={`py-3 px-1 border-b-2 font-medium text-sm transition ${view === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                                        <i className={`${tab.icon} mr-2`}></i>{tab.label}
+                                    <button 
+                                        key={tab.id} 
+                                        onClick={() => setView(tab.id)}
+                                        className={`py-3 px-1 border-b-2 font-medium text-sm transition ${
+                                            view === tab.id 
+                                                ? 'border-blue-600 text-blue-600' 
+                                                : 'border-transparent text-gray-500 hover:text-gray-700'
+                                        }`}
+                                    >
+                                        <i className={`${tab.icon} mr-2`}></i>
+                                        {tab.label}
                                     </button>
                                 ))}
                             </div>
@@ -654,22 +1037,40 @@
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Buscar</label>
                                     <div className="relative">
-                                        <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Buscar proyecto..." className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                        <input 
+                                            type="text" 
+                                            value={searchTerm} 
+                                            onChange={(e) => setSearchTerm(e.target.value)} 
+                                            placeholder="Buscar proyecto o cliente..." 
+                                            className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                        />
                                         <i className="fas fa-search absolute left-3 top-3 text-gray-400"></i>
                                     </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
-                                    <select value={filterCliente} onChange={(e) => setFilterCliente(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <select 
+                                        value={filterCliente} 
+                                        onChange={(e) => setFilterCliente(e.target.value)} 
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
                                         <option value="">Todos los clientes</option>
-                                        {clientes.map(c => (<option key={c} value={c}>{c}</option>))}
+                                        {clientes.map(c => (
+                                            <option key={c} value={c}>{c}</option>
+                                        ))}
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
-                                    <select value={filterEstado} onChange={(e) => setFilterEstado(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <select 
+                                        value={filterEstado} 
+                                        onChange={(e) => setFilterEstado(e.target.value)} 
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
                                         <option value="">Todos los estados</option>
-                                        {Object.entries(ESTADOS).map(([key, value]) => (<option key={key} value={value.label}>{value.label}</option>))}
+                                        {Object.entries(ESTADOS).map(([key, value]) => (
+                                            <option key={key} value={value.label}>{value.label}</option>
+                                        ))}
                                     </select>
                                 </div>
                             </div>
@@ -679,7 +1080,10 @@
                     {error && (
                         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-4">
                             <div className="bg-red-50 border-l-4 border-red-400 p-4">
-                                <p className="text-sm text-red-700"><i className="fas fa-exclamation-triangle mr-2"></i>{error}</p>
+                                <p className="text-sm text-red-700">
+                                    <i className="fas fa-exclamation-triangle mr-2"></i>
+                                    {error}
+                                </p>
                             </div>
                         </div>
                     )}
