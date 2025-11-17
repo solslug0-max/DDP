@@ -3,1084 +3,429 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Plataforma DDP - Versión Optimizada</title>
+    <title>Plataforma DDP</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         
         .loading-spinner { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         
-        @keyframes slideIn { 
-            from { transform: translateX(100%); opacity: 0; } 
-            to { transform: translateX(0); opacity: 1; } 
+        .project-card { transition: all 0.2s ease; cursor: move; user-select: none; }
+        .project-card:hover { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(0,0,0,0.15); }
+        .project-card.dragging { opacity: 0.5; transform: rotate(2deg); }
+        
+        .drop-zone { transition: all 0.2s ease; min-height: 100px; }
+        .drop-zone.drag-over { background-color: rgba(59, 130, 246, 0.1); border: 2px dashed #3b82f6; }
+        
+        /* Patrón de cuadrícula para el Gantt (Estilo WeaveFlow) */
+        .bg-grid-pattern {
+            background-image: linear-gradient(to right, #f3f4f6 1px, transparent 1px),
+                              linear-gradient(to bottom, #f3f4f6 1px, transparent 1px);
+            background-size: 120px 100%;
         }
         
-        @keyframes fadeIn {
-            from { opacity: 0; transform: scale(0.95); }
-            to { opacity: 1; transform: scale(1); }
-        }
-        
-        .project-card { 
-            transition: all 0.2s ease; 
-            cursor: move;
-            user-select: none;
-        }
-        
-        .project-card:hover { 
-            transform: translateY(-2px); 
-            box-shadow: 0 8px 16px rgba(0,0,0,0.15); 
-        }
-        
-        .project-card.dragging {
-            opacity: 0.5;
-            transform: rotate(2deg);
-        }
-        
-        .drop-zone {
-            transition: all 0.2s ease;
-            min-height: 100px;
-        }
-        
-        .drop-zone.drag-over {
-            background-color: rgba(59, 130, 246, 0.1);
-            border: 2px dashed #3b82f6;
-        }
-        
-        .unsaved-indicator {
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        .modal-overlay {
-            animation: fadeIn 0.2s ease;
-        }
-        
-        /* Optimización visual */
-        .fast-transition {
-            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        /* Indicador de cambios sin guardar */
-        .has-changes::before {
-            content: '';
-            position: absolute;
-            top: -4px;
-            right: -4px;
-            width: 8px;
-            height: 8px;
-            background-color: #ef4444;
-            border-radius: 50%;
-            animation: pulse 1.5s infinite;
-        }
+        .fast-transition { transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1); }
+        .modal-overlay { animation: fadeIn 0.2s ease; }
     </style>
 </head>
 <body>
     <div id="root"></div>
+
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef, useReducer } = React;
 
         // ============================================
-        // CONFIGURACIÓN
+        // CONFIGURACIÓN Y DATOS FALSOS (MOCK)
         // ============================================
-        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwDNDbWX2X0E5WL1hh93I86RJ5ErarK9J2yd3q7dUdhoy4OSbkQBcQvtMD3j6Jm3ZKC4g/exec';
+        const GOOGLE_SCRIPT_URL = 'TU_URL_DEL_SCRIPT_AQUI'; // Reemplaza con tu URL real
         
         const ESTADOS = {
             CREADO: { label: "CREADO", color: "bg-gray-500", code: "10" },
             EN_PROCESO: { label: "EN PROCESO", color: "bg-blue-500", code: "50" },
-            RESPUESTA_COMERCIAL: { label: "RESPUESTA COMERCIAL", color: "bg-yellow-500", code: "70" },
+            TEJIDO: { label: "TEJIDO", color: "bg-indigo-500", code: "60" },
             FINALIZADO: { label: "FINALIZADO", color: "bg-green-500", code: "80" },
             ANULADO: { label: "ANULADO", color: "bg-red-500", code: "90" }
         };
 
-        const PROCESOS = [
-            "Ficha técnica", 
-            "Tejido", 
-            "Hoja de costo", 
-            "Acabado", 
-            "Recepción", 
-            "Muestras", 
-            "Aprobación cliente"
+        // Datos de ejemplo para probar sin backend
+        const INITIAL_DATA = [
+            { id: '1', nombre: 'BASE SHORT ROSADO', cliente: 'WOALLANCE', estado: 'TEJIDO', proceso: 'Tejido', hiloUrdimbre: '40/1 Tanguis', fechaProgramada: null },
+            { id: '2', nombre: 'CUADROS VICHY AZUL', cliente: 'GAP', estado: 'EN PROCESO', proceso: 'Ficha técnica', hiloUrdimbre: '50/1 Poly/Alg', fechaProgramada: null },
+            { id: '3', nombre: 'TELA ECOLOGICA', cliente: 'BCP', estado: 'TEJIDO', proceso: 'Muestras', hiloUrdimbre: '20/1 Reciclado', fechaProgramada: new Date().toISOString() }
         ];
 
         // ============================================
-        // CACHE LOCAL Y GESTIÓN DE ESTADO
-        // ============================================
-        const LocalCache = {
-            save: (key, data) => {
-                try {
-                    localStorage.setItem(key, JSON.stringify({
-                        data,
-                        timestamp: Date.now()
-                    }));
-                } catch (e) {
-                    console.error('Error guardando en caché:', e);
-                }
-            },
-            
-            get: (key, maxAge = 5 * 60 * 1000) => { // 5 minutos por defecto
-                try {
-                    const item = localStorage.getItem(key);
-                    if (!item) return null;
-                    
-                    const { data, timestamp } = JSON.parse(item);
-                    const age = Date.now() - timestamp;
-                    
-                    if (age > maxAge) {
-                        localStorage.removeItem(key);
-                        return null;
-                    }
-                    
-                    return data;
-                } catch (e) {
-                    console.error('Error leyendo caché:', e);
-                    return null;
-                }
-            },
-            
-            clear: (key) => {
-                localStorage.removeItem(key);
-            }
-        };
-
-        // ============================================
-        // REDUCER PARA MANEJO DE ESTADO
-        // ============================================
-        const projectsReducer = (state, action) => {
-            switch (action.type) {
-                case 'SET_PROJECTS':
-                    return {
-                        ...state,
-                        projects: action.payload,
-                        originalProjects: action.payload,
-                        hasChanges: false
-                    };
-                    
-                case 'UPDATE_PROJECT_STATUS':
-                    const updatedProjects = state.projects.map(p =>
-                        p.id === action.payload.id 
-                            ? { ...p, estado: action.payload.status }
-                            : p
-                    );
-                    return {
-                        ...state,
-                        projects: updatedProjects,
-                        hasChanges: true,
-                        pendingChanges: [
-                            ...state.pendingChanges.filter(c => c.id !== action.payload.id),
-                            { id: action.payload.id, type: 'status', status: action.payload.status }
-                        ]
-                    };
-                    
-                case 'ADD_PROJECT':
-                    const newProject = {
-                        ...action.payload,
-                        id: `temp_${Date.now()}`,
-                        isNew: true
-                    };
-                    return {
-                        ...state,
-                        projects: [...state.projects, newProject],
-                        hasChanges: true,
-                        pendingChanges: [...state.pendingChanges, { type: 'create', project: newProject }]
-                    };
-                    
-                case 'UPDATE_PROJECT':
-                    const updated = state.projects.map(p =>
-                        p.id === action.payload.id ? { ...p, ...action.payload.data } : p
-                    );
-                    return {
-                        ...state,
-                        projects: updated,
-                        hasChanges: true,
-                        pendingChanges: [
-                            ...state.pendingChanges.filter(c => c.id !== action.payload.id),
-                            { id: action.payload.id, type: 'update', data: action.payload.data }
-                        ]
-                    };
-                    
-                case 'DELETE_PROJECT':
-                    return {
-                        ...state,
-                        projects: state.projects.filter(p => p.id !== action.payload),
-                        hasChanges: true,
-                        pendingChanges: [...state.pendingChanges, { id: action.payload, type: 'delete' }]
-                    };
-                    
-                case 'CLEAR_CHANGES':
-                    return {
-                        ...state,
-                        hasChanges: false,
-                        pendingChanges: []
-                    };
-                    
-                case 'REVERT_CHANGES':
-                    return {
-                        ...state,
-                        projects: state.originalProjects,
-                        hasChanges: false,
-                        pendingChanges: []
-                    };
-                    
-                default:
-                    return state;
-            }
-        };
-
-        // ============================================
-        // API SERVICE OPTIMIZADO
+        // API SERVICE (Simulado para Demo)
         // ============================================
         class GoogleSheetsAPI {
-            constructor(baseUrl) {
-                this.baseUrl = baseUrl;
-                this.requestQueue = [];
-                this.isProcessing = false;
-            }
-
-            async request(action, data = {}) {
-                const payload = { action, ...data };
-                console.log('📤 Request:', action);
-                
-                try {
-                    const response = await fetch(this.baseUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify(payload)
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
-
-                    const result = await response.json();
-                    
-                    if (!result.success) {
-                        throw new Error(result.error || 'Error desconocido');
-                    }
-                    
-                    return result;
-                } catch (error) {
-                    console.error('❌ Error:', error);
-                    throw error;
-                }
-            }
-
-            // Métodos batch para múltiples operaciones
-            async batchUpdate(changes) {
-                return this.request('batchUpdate', { changes });
-            }
-
-            async getProjects() { 
-                return this.request('getProjects'); 
-            }
-            
-            async createProject(project) { 
-                return this.request('createProject', { project }); 
-            }
-            
-            async updateProject(id, project) { 
-                return this.request('updateProject', { id, project }); 
-            }
-            
-            async deleteProject(id) { 
-                return this.request('deleteProject', { id }); 
-            }
-            
-            async updateProjectStatus(id, status) { 
-                return this.request('updateStatus', { id, status }); 
-            }
+            constructor(baseUrl) { this.baseUrl = baseUrl; }
+            // Aquí irían las llamadas reales fetch...
         }
 
-        const api = new GoogleSheetsAPI(GOOGLE_SCRIPT_URL);
+        // ============================================
+        // COMPONENTE: NOTIFICACIÓN
+        // ============================================
+        const Notification = ({ notification, setNotification }) => {
+            useEffect(() => {
+                const timer = setTimeout(() => setNotification(null), 3000);
+                return () => clearTimeout(timer);
+            }, []);
+
+            const bgColor = notification.type === 'success' ? 'bg-green-500' 
+                : notification.type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+
+            return (
+                <div className={`fixed top-20 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50`}
+                     style={{ animation: 'slideIn 0.3s ease' }}>
+                    <span>{notification.message}</span>
+                </div>
+            );
+        };
 
         // ============================================
-        // COMPONENTE PRINCIPAL OPTIMIZADO
+        // COMPONENTE: MODAL DETALLADO (NUEVO)
         // ============================================
-        function App() {
-            const [state, dispatch] = useReducer(projectsReducer, {
-                projects: [],
-                originalProjects: [],
-                hasChanges: false,
-                pendingChanges: []
+        const ProjectModal = ({ selectedProject, setShowModal, saveProject }) => {
+            const [formData, setFormData] = useState(selectedProject || {
+                area: "COMERCIAL",
+                solicitante: "",
+                cliente: "",
+                fechaRequerida: new Date().toISOString().split('T')[0],
+                usoFinal: "Camisa",
+                acabado: "",
+                acabadoPrenda: "",
+                articuloBase: "",
+                nombre: "", // Diseño/Nombre
+                combinacion: "",
+                anchoAcabado: "",
+                pesoAcabado: "",
+                otros: "",
+                hiloUrdimbre: "",
+                hiloTrama: "",
+                estado: "CREADO",
+                proceso: "Ficha técnica"
             });
-            
-            const [view, setView] = useState('dashboard');
-            const [loading, setLoading] = useState(true);
-            const [syncing, setSyncing] = useState(false);
-            const [notification, setNotification] = useState(null);
-            const [lastSync, setLastSync] = useState(null);
-            const [showModal, setShowModal] = useState(false);
-            const [selectedProject, setSelectedProject] = useState(null);
-            const [searchTerm, setSearchTerm] = useState('');
-            const [filterCliente, setFilterCliente] = useState('');
-            const [filterEstado, setFilterEstado] = useState('');
-            const [autoSync, setAutoSync] = useState(false);
-            const draggedItemRef = useRef(null);
 
-            const showNotification = useCallback((message, type = 'info') => {
-                setNotification({ message, type, id: Date.now() });
-            }, []);
-
-            // Cargar proyectos con caché
-            const loadProjects = useCallback(async (forceRefresh = false) => {
-                try {
-                    if (!forceRefresh) {
-                        const cached = LocalCache.get('projects');
-                        if (cached) {
-                            dispatch({ type: 'SET_PROJECTS', payload: cached });
-                            setLoading(false);
-                            setLastSync(new Date(LocalCache.get('lastSync')));
-                            console.log('📦 Cargado desde caché');
-                            return;
-                        }
-                    }
-
-                    setSyncing(true);
-                    const response = await api.getProjects();
-                    const projects = response.projects || [];
-                    
-                    dispatch({ type: 'SET_PROJECTS', payload: projects });
-                    LocalCache.save('projects', projects);
-                    LocalCache.save('lastSync', Date.now());
-                    setLastSync(new Date());
-                    
-                    if (!loading) {
-                        showNotification('✅ Datos actualizados', 'success');
-                    }
-                } catch (error) {
-                    console.error('Error:', error);
-                    showNotification('❌ Error al cargar: ' + error.message, 'error');
-                } finally {
-                    setLoading(false);
-                    setSyncing(false);
-                }
-            }, [loading, showNotification]);
-
-            // Guardar cambios pendientes
-            const saveChanges = useCallback(async () => {
-                if (!state.hasChanges || state.pendingChanges.length === 0) {
-                    showNotification('✨ No hay cambios pendientes', 'info');
-                    return;
-                }
-
-                try {
-                    setSyncing(true);
-                    showNotification('💾 Guardando cambios...', 'info');
-
-                    // Procesar cada cambio pendiente
-                    for (const change of state.pendingChanges) {
-                        switch (change.type) {
-                            case 'create':
-                                await api.createProject(change.project);
-                                break;
-                            case 'update':
-                                await api.updateProject(change.id, change.data);
-                                break;
-                            case 'delete':
-                                await api.deleteProject(change.id);
-                                break;
-                            case 'status':
-                                await api.updateProjectStatus(change.id, change.status);
-                                break;
-                        }
-                    }
-
-                    dispatch({ type: 'CLEAR_CHANGES' });
-                    LocalCache.clear('projects');
-                    await loadProjects(true);
-                    showNotification('✅ Cambios guardados exitosamente', 'success');
-                    
-                } catch (error) {
-                    console.error('Error guardando:', error);
-                    showNotification('❌ Error al guardar: ' + error.message, 'error');
-                } finally {
-                    setSyncing(false);
-                }
-            }, [state.hasChanges, state.pendingChanges, loadProjects, showNotification]);
-
-            // Revertir cambios
-            const revertChanges = useCallback(() => {
-                if (!state.hasChanges) return;
-                
-                if (confirm('¿Descartar todos los cambios sin guardar?')) {
-                    dispatch({ type: 'REVERT_CHANGES' });
-                    showNotification('↩️ Cambios revertidos', 'info');
-                }
-            }, [state.hasChanges, showNotification]);
-
-            // Cargar inicial
-            useEffect(() => {
-                loadProjects();
-            }, []);
-
-            // Auto-sync opcional
-            useEffect(() => {
-                if (!autoSync) return;
-                
-                const interval = setInterval(() => {
-                    if (!state.hasChanges) {
-                        loadProjects(true);
-                    }
-                }, 60000); // 1 minuto
-                
-                return () => clearInterval(interval);
-            }, [autoSync, state.hasChanges, loadProjects]);
-
-            // Drag & Drop handlers optimizados
-            const handleDragStart = useCallback((e, project) => {
-                draggedItemRef.current = project;
-                e.dataTransfer.effectAllowed = 'move';
-                e.currentTarget.classList.add('dragging');
-            }, []);
-
-            const handleDragEnd = useCallback((e) => {
-                e.currentTarget.classList.remove('dragging');
-                document.querySelectorAll('.drop-zone').forEach(zone => {
-                    zone.classList.remove('drag-over');
-                });
-            }, []);
-
-            const handleDragOver = useCallback((e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-            }, []);
-
-            const handleDragEnter = useCallback((e) => {
-                e.currentTarget.classList.add('drag-over');
-            }, []);
-
-            const handleDragLeave = useCallback((e) => {
-                if (e.currentTarget === e.target) {
-                    e.currentTarget.classList.remove('drag-over');
-                }
-            }, []);
-
-            const handleDrop = useCallback((e, newStatus) => {
-                e.preventDefault();
-                e.currentTarget.classList.remove('drag-over');
-                
-                if (draggedItemRef.current && draggedItemRef.current.estado !== newStatus) {
-                    dispatch({
-                        type: 'UPDATE_PROJECT_STATUS',
-                        payload: {
-                            id: draggedItemRef.current.id,
-                            status: newStatus
-                        }
-                    });
-                    
-                    showNotification(`📦 Movido a ${newStatus}`, 'info');
-                }
-                
-                draggedItemRef.current = null;
-            }, [showNotification]);
-
-            // Guardar proyecto (modal)
-            const saveProject = useCallback((projectData) => {
-                if (selectedProject) {
-                    dispatch({
-                        type: 'UPDATE_PROJECT',
-                        payload: {
-                            id: selectedProject.id,
-                            data: projectData
-                        }
-                    });
-                    showNotification('✏️ Proyecto actualizado (sin guardar)', 'info');
-                } else {
-                    dispatch({
-                        type: 'ADD_PROJECT',
-                        payload: projectData
-                    });
-                    showNotification('➕ Proyecto añadido (sin guardar)', 'info');
-                }
-                
-                setShowModal(false);
-                setSelectedProject(null);
-            }, [selectedProject, showNotification]);
-
-            // Eliminar proyecto
-            const deleteProject = useCallback((id) => {
-                if (confirm('¿Eliminar este proyecto?')) {
-                    dispatch({ type: 'DELETE_PROJECT', payload: id });
-                    showNotification('🗑️ Proyecto eliminado (sin guardar)', 'info');
-                }
-            }, [showNotification]);
-
-            // Filtros y cálculos
-            const clientes = useMemo(() => {
-                return [...new Set(state.projects.map(p => p.cliente).filter(Boolean))].sort();
-            }, [state.projects]);
-
-            const filteredProjects = useMemo(() => {
-                return state.projects.filter(project => {
-                    const matchSearch = !searchTerm || 
-                        project.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        project.cliente?.toLowerCase().includes(searchTerm.toLowerCase());
-                    const matchCliente = !filterCliente || project.cliente === filterCliente;
-                    const matchEstado = !filterEstado || project.estado === filterEstado;
-                    return matchSearch && matchCliente && matchEstado;
-                });
-            }, [state.projects, searchTerm, filterCliente, filterEstado]);
-
-            const stats = useMemo(() => {
-                const total = filteredProjects.length;
-                const byStatus = {};
-                let totalProgress = 0;
-                
-                filteredProjects.forEach(project => {
-                    byStatus[project.estado] = (byStatus[project.estado] || 0) + 1;
-                    totalProgress += project.progreso || 0;
-                });
-                
-                return { 
-                    total, 
-                    byStatus, 
-                    avgProgress: total > 0 ? Math.round(totalProgress / total) : 0 
-                };
-            }, [filteredProjects]);
-
-            // ============================================
-            // COMPONENTE DE NOTIFICACIÓN
-            // ============================================
-            const Notification = () => {
-                useEffect(() => {
-                    const timer = setTimeout(() => setNotification(null), 3000);
-                    return () => clearTimeout(timer);
-                }, []);
-
-                const bgColor = notification.type === 'success' ? 'bg-green-500' 
-                    : notification.type === 'error' ? 'bg-red-500' 
-                    : 'bg-blue-500';
-
-                return (
-                    <div className={`fixed top-20 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50`}
-                         style={{ animation: 'slideIn 0.3s ease' }}>
-                        <span>{notification.message}</span>
-                    </div>
-                );
+            const handleChange = (field, value) => {
+                setFormData(prev => ({ ...prev, [field]: value }));
             };
 
-            // ============================================
-            // MODAL DE PROYECTO
-            // ============================================
-            const ProjectModal = () => {
-                const [formData, setFormData] = useState(selectedProject || {
-                    codigo: "50",
-                    nombre: "",
-                    cliente: "",
-                    uso: "Camisa",
-                    estilo: "Hilo color",
-                    objetivo: "Nuevo producto",
-                    ligamento: "",
-                    hiloUrdimbre: "",
-                    hiloTrama: "",
-                    pesoTeorico: "",
-                    ancho: "150",
-                    composicion: "",
-                    estado: "EN PROCESO",
-                    proceso: "Ficha técnica",
-                    observaciones: "",
-                    fechaMuestra: "",
-                    progreso: 0
-                });
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 modal-overlay" 
+                     onClick={(e) => e.target === e.currentTarget && setShowModal(false)}>
+                    
+                    <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-fadeIn">
+                        {/* Header */}
+                        <div className="sticky top-0 bg-slate-800 text-white px-6 py-4 flex justify-between items-center z-10">
+                            <h2 className="text-xl font-bold flex items-center gap-2">
+                                <i className="fas fa-file-signature"></i>
+                                {selectedProject ? 'Editar Solicitud' : 'Nueva Solicitud de Desarrollo'}
+                            </h2>
+                            <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white transition">
+                                <i className="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        
+                        <form onSubmit={(e) => { e.preventDefault(); saveProject(formData); }} className="p-6 bg-gray-50">
+                            
+                            {/* 1. Datos Generales */}
+                            <div className="bg-white p-4 rounded shadow-sm border border-gray-200 mb-4">
+                                <h3 className="text-sm font-bold text-blue-800 uppercase mb-3 border-b pb-1">Datos Generales</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase">Área</label>
+                                        <select className="w-full p-2 border rounded bg-gray-50"
+                                            value={formData.area} onChange={e => handleChange('area', e.target.value)}>
+                                            <option>COMERCIAL</option><option>DISEÑO</option><option>PRODUCCIÓN</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase">Solicitante</label>
+                                        <input type="text" className="w-full p-2 border rounded" value={formData.solicitante} onChange={e => handleChange('solicitante', e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase">Cliente Final</label>
+                                        <input type="text" className="w-full p-2 border rounded" value={formData.cliente} onChange={e => handleChange('cliente', e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase">Fecha Req.</label>
+                                        <input type="date" className="w-full p-2 border rounded" value={formData.fechaRequerida} onChange={e => handleChange('fechaRequerida', e.target.value)} />
+                                    </div>
+                                </div>
+                            </div>
 
-                return (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 modal-overlay" 
-                         onClick={(e) => {
-                            if (e.target === e.currentTarget) {
-                                setShowModal(false);
-                                setSelectedProject(null);
-                            }
-                         }}>
-                        <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
-                             style={{ animation: 'fadeIn 0.3s ease' }}>
-                            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
-                                <h2 className="text-xl font-bold text-gray-800">
-                                    {selectedProject ? '✏️ Editar Proyecto' : '➕ Nuevo Proyecto'}
-                                </h2>
-                                <button onClick={() => { setShowModal(false); setSelectedProject(null); }} 
-                                        className="text-gray-500 hover:text-gray-700 text-2xl">
-                                    <i className="fas fa-times"></i>
+                            {/* 2. Especificaciones */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                <div className="bg-white p-4 rounded shadow-sm border border-gray-200">
+                                    <h3 className="text-sm font-bold text-gray-700 mb-3">Definición</h3>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-xs text-gray-500">Uso Final</label>
+                                            <select className="w-full p-2 border rounded" value={formData.usoFinal} onChange={e => handleChange('usoFinal', e.target.value)}>
+                                                <option>Camisa</option><option>Pantalón</option><option>Otro</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-gray-500">Acabado</label>
+                                            <input type="text" className="w-full p-2 border rounded" value={formData.acabado} onChange={e => handleChange('acabado', e.target.value)}/>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="md:col-span-2 bg-white p-4 rounded shadow-sm border border-gray-200">
+                                    <h3 className="text-sm font-bold text-gray-700 mb-3">Ficha Técnica</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-blue-600">ARTÍCULO BASE</label>
+                                            <input type="text" className="w-full p-2 border-b-2 border-blue-200 bg-blue-50" required value={formData.articuloBase} onChange={e => handleChange('articuloBase', e.target.value)}/>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-blue-600">NOMBRE DISEÑO</label>
+                                            <input type="text" className="w-full p-2 border-b-2 border-blue-200 bg-blue-50" required value={formData.nombre} onChange={e => handleChange('nombre', e.target.value)}/>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input type="number" className="w-full p-2 border rounded" placeholder="Ancho (m)" value={formData.anchoAcabado} onChange={e => handleChange('anchoAcabado', e.target.value)}/>
+                                            <input type="number" className="w-full p-2 border rounded" placeholder="Peso (g)" value={formData.pesoAcabado} onChange={e => handleChange('pesoAcabado', e.target.value)}/>
+                                        </div>
+                                        <input type="text" className="w-full p-2 border rounded" placeholder="Combinación" value={formData.combinacion} onChange={e => handleChange('combinacion', e.target.value)}/>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 3. Hilado */}
+                            <div className="bg-white p-4 rounded shadow-sm border border-gray-200 mb-6">
+                                <h3 className="text-sm font-bold text-gray-700 mb-3">Hilado</h3>
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div className="flex items-center gap-3">
+                                        <i className="fas fa-arrow-down text-gray-400"></i>
+                                        <input type="text" className="w-full p-2 border-b" placeholder="Urdimbre" value={formData.hiloUrdimbre} onChange={e => handleChange('hiloUrdimbre', e.target.value)}/>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <i className="fas fa-arrow-right text-gray-400"></i>
+                                        <input type="text" className="w-full p-2 border-b" placeholder="Trama" value={formData.hiloTrama} onChange={e => handleChange('hiloTrama', e.target.value)}/>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                                <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 rounded border bg-white">Cancelar</button>
+                                <button type="submit" className="px-8 py-2 rounded bg-blue-700 text-white font-bold hover:bg-blue-800">
+                                    <i className="fas fa-paper-plane mr-2"></i>Guardar
                                 </button>
                             </div>
-                            
-                            <form onSubmit={(e) => {
-                                e.preventDefault();
-                                saveProject(formData);
-                            }} className="p-6 space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Nombre del Proyecto *
-                                        </label>
-                                        <input 
-                                            type="text" 
-                                            value={formData.nombre} 
-                                            onChange={(e) => setFormData({...formData, nombre: e.target.value})} 
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                                            required 
-                                            placeholder="Ej: BASE SHORT ROSADO" 
-                                        />
-                                    </div>
-                                    
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Cliente *</label>
-                                        <input 
-                                            type="text" 
-                                            value={formData.cliente} 
-                                            onChange={(e) => setFormData({...formData, cliente: e.target.value})} 
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                                            list="clientes-list" 
-                                            required 
-                                        />
-                                        <datalist id="clientes-list">
-                                            {clientes.map(c => <option key={c} value={c} />)}
-                                        </datalist>
-                                    </div>
-                                    
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
-                                        <select 
-                                            value={formData.estado} 
-                                            onChange={(e) => setFormData({...formData, estado: e.target.value})} 
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                            {Object.values(ESTADOS).map(e => 
-                                                <option key={e.label} value={e.label}>{e.label}</option>
-                                            )}
-                                        </select>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Proceso Actual</label>
-                                        <select 
-                                            value={formData.proceso} 
-                                            onChange={(e) => setFormData({...formData, proceso: e.target.value})} 
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                            {PROCESOS.map(p => <option key={p} value={p}>{p}</option>)}
-                                        </select>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Tipo/Uso</label>
-                                        <select 
-                                            value={formData.uso} 
-                                            onChange={(e) => setFormData({...formData, uso: e.target.value})} 
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                            <option value="Camisa">Camisa</option>
-                                            <option value="Pantalón">Pantalón</option>
-                                            <option value="Tñ.Pieza">Tñ.Pieza</option>
-                                            <option value="PPT">PPT</option>
-                                        </select>
-                                    </div>
-                                    
-                                    <div className="col-span-2">
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
-                                        <textarea 
-                                            value={formData.observaciones} 
-                                            onChange={(e) => setFormData({...formData, observaciones: e.target.value})} 
-                                            rows="2" 
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                                            placeholder="Notas..."
-                                        />
-                                    </div>
-                                </div>
-                                
-                                <div className="flex justify-end gap-3 pt-4 border-t">
-                                    <button 
-                                        type="button" 
-                                        onClick={() => { setShowModal(false); setSelectedProject(null); }} 
-                                        className="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 fast-transition">
-                                        Cancelar
-                                    </button>
-                                    <button 
-                                        type="submit" 
-                                        className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 fast-transition">
-                                        {selectedProject ? 'Actualizar' : 'Crear'}
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                );
-            };
-
-            // ============================================
-            // VISTA DASHBOARD
-            // ============================================
-            const DashboardView = () => (
-                <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div className="bg-white rounded-lg shadow p-6 fast-transition hover:shadow-lg">
-                            <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-sm font-medium text-gray-500">Total Proyectos</h3>
-                                <i className="fas fa-folder text-2xl text-blue-500"></i>
-                            </div>
-                            <p className="text-3xl font-bold text-gray-800">{stats.total}</p>
-                        </div>
-                        
-                        <div className="bg-white rounded-lg shadow p-6 fast-transition hover:shadow-lg">
-                            <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-sm font-medium text-gray-500">En Proceso</h3>
-                                <i className="fas fa-spinner text-2xl text-yellow-500"></i>
-                            </div>
-                            <p className="text-3xl font-bold text-gray-800">{stats.byStatus['EN PROCESO'] || 0}</p>
-                        </div>
-                        
-                        <div className="bg-white rounded-lg shadow p-6 fast-transition hover:shadow-lg">
-                            <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-sm font-medium text-gray-500">Progreso Promedio</h3>
-                                <i className="fas fa-chart-line text-2xl text-green-500"></i>
-                            </div>
-                            <p className="text-3xl font-bold text-gray-800">{stats.avgProgress}%</p>
-                        </div>
-                        
-                        <div className="bg-white rounded-lg shadow p-6 fast-transition hover:shadow-lg">
-                            <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-sm font-medium text-gray-500">Clientes</h3>
-                                <i className="fas fa-users text-2xl text-purple-500"></i>
-                            </div>
-                            <p className="text-3xl font-bold text-gray-800">{clientes.length}</p>
-                        </div>
-                    </div>
-                    
-                    <div className="bg-white rounded-lg shadow p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4">📋 Proyectos Recientes</h3>
-                        <div className="space-y-2">
-                            {filteredProjects.slice(0, 5).map(project => {
-                                const statusConfig = Object.values(ESTADOS).find(s => s.label === project.estado);
-                                return (
-                                    <div key={project.id} 
-                                         className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 fast-transition cursor-pointer" 
-                                         onClick={() => { setSelectedProject(project); setShowModal(true); }}>
-                                        <div className="flex items-center space-x-3">
-                                            <div className={`w-2 h-2 rounded-full ${statusConfig?.color || 'bg-gray-500'}`}></div>
-                                            <div>
-                                                <p className="font-medium text-gray-800">{project.nombre}</p>
-                                                <p className="text-sm text-gray-600">{project.cliente}</p>
-                                            </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-sm text-gray-600">{project.proceso}</p>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                            {filteredProjects.length === 0 && (
-                                <div className="text-center py-8 text-gray-500">
-                                    <i className="fas fa-inbox text-4xl mb-2"></i>
-                                    <p>No hay proyectos</p>
-                                </div>
-                            )}
-                        </div>
+                        </form>
                     </div>
                 </div>
             );
+        };
 
-            // ============================================
-            // VISTA KANBAN OPTIMIZADA
-            // ============================================
-            const KanbanView = () => {
-                const columns = Object.values(ESTADOS).map(estado => ({
-                    ...estado,
-                    projects: filteredProjects.filter(p => p.estado === estado.label)
-                }));
+        // ============================================
+        // COMPONENTE: GANTT HANDLOOM (NUEVO)
+        // ============================================
+        const HandloomView = ({ projects, onUpdateProject }) => {
+            const daysToShow = 14;
+            const cellWidth = 120;
+            const today = new Date();
+            
+            const dates = useMemo(() => {
+                return Array.from({ length: daysToShow }).map((_, i) => {
+                    const d = new Date();
+                    d.setDate(today.getDate() + i);
+                    return d;
+                });
+            }, []);
+
+            // Filtro: Proyectos que están en etapa Tejido/Muestras y NO tienen fecha
+            const backlogProjects = projects.filter(p => 
+                (p.estado === 'TEJIDO' || p.proceso === 'Muestras' || p.proceso === 'Tejido') && !p.fechaProgramada
+            );
+
+            // Proyectos con fecha
+            const scheduledProjects = projects.filter(p => p.fechaProgramada).map(p => {
+                const start = new Date(p.fechaProgramada);
+                const diffTime = start - today; // Puede ser negativo si es pasado
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                // Solo mostramos si está dentro del rango visible (aprox)
+                const offset = diffDays * cellWidth;
+                return { ...p, offset, duration: 2 }; // Duración fija 2 días para demo
+            });
+
+            const handleDragStart = (e, project) => {
+                e.dataTransfer.setData('projectId', project.id);
+            };
+
+            const handleDropOnDay = (e, date) => {
+                e.preventDefault();
+                const projectId = e.dataTransfer.getData('projectId');
+                const project = projects.find(p => p.id.toString() === projectId);
                 
-                return (
-                    <div className="flex gap-4 overflow-x-auto pb-4">
-                        {columns.map(column => (
-                            <div key={column.label} className="flex-shrink-0 w-80">
-                                <div className={`${column.color} text-white px-4 py-2 rounded-t-lg flex justify-between items-center`}>
-                                    <span className="font-semibold">{column.label}</span>
-                                    <span className="bg-white bg-opacity-30 px-2 py-1 rounded-full text-sm">
-                                        {column.projects.length}
-                                    </span>
+                if (project) {
+                    onUpdateProject({
+                        ...project,
+                        fechaProgramada: date.toISOString(),
+                        proceso: 'Tejido',
+                        estado: 'TEJIDO'
+                    });
+                }
+            };
+
+            return (
+                <div className="flex h-[calc(100vh-140px)] bg-gray-100 overflow-hidden border-t border-gray-300">
+                    {/* BACKLOG */}
+                    <div className="w-80 bg-white border-r border-gray-200 flex flex-col shadow-md z-10">
+                        <div className="p-4 bg-slate-800 text-white flex justify-between items-center">
+                            <h3 className="font-bold"><i className="fas fa-list-ul mr-2"></i>Cola de Espera</h3>
+                            <span className="bg-blue-500 text-xs px-2 py-1 rounded-full">{backlogProjects.length}</span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50">
+                            {backlogProjects.map(p => (
+                                <div key={p.id} draggable onDragStart={(e) => handleDragStart(e, p)}
+                                     className="bg-white p-3 rounded-l border-l-4 border-blue-500 shadow-sm hover:shadow-md cursor-move">
+                                    <div className="font-bold text-sm">{p.nombre}</div>
+                                    <div className="text-xs text-gray-500">{p.cliente}</div>
+                                    <div className="mt-1 text-[10px] bg-gray-100 inline-block px-1 rounded">{p.hiloUrdimbre || 'Sin hilado'}</div>
                                 </div>
-                                <div 
-                                    className="drop-zone bg-gray-50 min-h-[400px] p-3 rounded-b-lg fast-transition"
-                                    onDragOver={handleDragOver}
-                                    onDragEnter={handleDragEnter}
-                                    onDragLeave={handleDragLeave}
-                                    onDrop={(e) => handleDrop(e, column.label)}
-                                >
-                                    {column.projects.map(project => (
-                                        <div 
-                                            key={project.id}
-                                            draggable
-                                            onDragStart={(e) => handleDragStart(e, project)}
-                                            onDragEnd={handleDragEnd}
-                                            className="project-card bg-white p-3 mb-2 rounded-lg shadow-sm relative"
-                                            onClick={() => { setSelectedProject(project); setShowModal(true); }}
-                                        >
-                                            {project.isNew && (
-                                                <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full"></span>
-                                            )}
-                                            <h4 className="font-semibold text-gray-800 text-sm mb-1">{project.nombre}</h4>
-                                            <p className="text-xs text-gray-600"><i className="fas fa-user mr-1"></i>{project.cliente}</p>
-                                            <p className="text-xs text-gray-600"><i className="fas fa-cog mr-1"></i>{project.proceso}</p>
+                            ))}
+                            {backlogProjects.length === 0 && <div className="text-center text-gray-400 mt-4 text-sm">Vacío</div>}
+                        </div>
+                    </div>
+
+                    {/* GANTT */}
+                    <div className="flex-1 flex flex-col bg-white overflow-x-auto">
+                        <div className="flex bg-gray-50 border-b h-12 sticky top-0 min-w-max z-20">
+                            <div className="w-40 flex-shrink-0 bg-slate-800 text-white flex items-center justify-center font-bold text-sm">TELAR</div>
+                            {dates.map((date, i) => (
+                                <div key={i} className={`flex-shrink-0 border-r flex flex-col items-center justify-center text-xs ${date.getDay()===0||date.getDay()===6?'bg-gray-100':''}`} style={{ width: cellWidth }}>
+                                    <span className="font-bold">{date.getDate()}</span>
+                                    <span className="text-[10px]">{date.toLocaleDateString('es-ES', { weekday: 'short' })}</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="flex-1 relative min-w-max bg-grid-pattern">
+                            <div className="flex h-24 border-b border-gray-200">
+                                <div className="w-40 flex-shrink-0 bg-white border-r flex items-center justify-center sticky left-0 z-10">
+                                    <div className="text-center">
+                                        <div className="font-bold text-blue-900">HANDLOOM #1</div>
+                                        <div className="text-xs text-green-600">Activo</div>
+                                    </div>
+                                </div>
+                                <div className="relative flex">
+                                    {dates.map((date, i) => (
+                                        <div key={i} onDragOver={e => e.preventDefault()} onDrop={(e) => handleDropOnDay(e, date)}
+                                             className="border-r border-gray-100 h-full hover:bg-blue-50" style={{ width: cellWidth }}></div>
+                                    ))}
+                                    {scheduledProjects.map(p => (
+                                        <div key={p.id} className="absolute top-2 h-20 rounded shadow-md bg-blue-600 text-white p-2 cursor-pointer hover:scale-[1.02] z-10 overflow-hidden"
+                                             style={{ left: p.offset, width: p.duration * cellWidth - 4, marginLeft: 2 }}
+                                             onClick={() => alert(p.nombre)}>
+                                            <div className="font-bold text-xs truncate">{p.cliente}</div>
+                                            <div className="font-bold text-sm mt-1 truncate">{p.nombre}</div>
                                         </div>
                                     ))}
                                 </div>
                             </div>
-                        ))}
+                        </div>
                     </div>
-                );
-            };
-
-            // ============================================
-            // VISTA TABLA
-            // ============================================
-            const TableView = () => (
-                <div className="bg-white rounded-lg shadow overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-gray-50 border-b">
-                            <tr>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proyecto</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cliente</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proceso</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                            {filteredProjects.map(project => {
-                                const statusConfig = Object.values(ESTADOS).find(s => s.label === project.estado);
-                                return (
-                                    <tr key={project.id} className="hover:bg-gray-50 fast-transition">
-                                        <td className="px-4 py-3">
-                                            <div className="flex items-center">
-                                                {project.isNew && (
-                                                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                                                )}
-                                                <div>
-                                                    <div className="text-sm font-medium">{project.nombre}</div>
-                                                    <div className="text-xs text-gray-500">{project.ligamento}</div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-sm">{project.cliente}</td>
-                                        <td className="px-4 py-3">
-                                            <span className={`px-2 py-1 text-xs font-semibold rounded-full text-white ${statusConfig?.color}`}>
-                                                {project.estado}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 text-sm">{project.proceso}</td>
-                                        <td className="px-4 py-3">
-                                            <button 
-                                                onClick={() => { setSelectedProject(project); setShowModal(true); }} 
-                                                className="text-blue-600 hover:text-blue-800 mr-3">
-                                                <i className="fas fa-edit"></i>
-                                            </button>
-                                            <button 
-                                                onClick={() => deleteProject(project.id)} 
-                                                className="text-red-600 hover:text-red-800">
-                                                <i className="fas fa-trash"></i>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                            {filteredProjects.length === 0 && (
-                                <tr>
-                                    <td colSpan="5" className="text-center py-8 text-gray-500">
-                                        No hay proyectos que mostrar
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
                 </div>
             );
+        };
 
-            // ============================================
-            // RENDERIZADO PRINCIPAL
-            // ============================================
+        // ============================================
+        // VISTAS SIMPLES (Dashboard, Kanban, Tabla)
+        // ============================================
+        const DashboardView = ({ projects }) => (
+            <div className="grid grid-cols-4 gap-4">
+                <div className="bg-white p-6 rounded shadow"><h3 className="text-gray-500">Total</h3><p className="text-3xl font-bold">{projects.length}</p></div>
+                <div className="bg-white p-6 rounded shadow"><h3 className="text-gray-500">En Tejeduría</h3><p className="text-3xl font-bold text-blue-600">{projects.filter(p => p.estado === 'TEJIDO').length}</p></div>
+            </div>
+        );
+
+        // ============================================
+        // APP PRINCIPAL
+        // ============================================
+        function App() {
+            const [projects, setProjects] = useState(INITIAL_DATA);
+            const [view, setView] = useState('dashboard');
+            const [showModal, setShowModal] = useState(false);
+            const [selectedProject, setSelectedProject] = useState(null);
+            const [notification, setNotification] = useState(null);
+
+            const showNotification = (msg, type) => setNotification({ message: msg, type, id: Date.now() });
+
+            const saveProject = (projectData) => {
+                if (projectData.id) {
+                    setProjects(prev => prev.map(p => p.id === projectData.id ? projectData : p));
+                    showNotification('Actualizado', 'success');
+                } else {
+                    const newP = { ...projectData, id: Date.now().toString(), estado: 'CREADO' };
+                    setProjects(prev => [...prev, newP]);
+                    showNotification('Creado', 'success');
+                }
+                setShowModal(false);
+                setSelectedProject(null);
+            };
+
             return (
                 <div className="min-h-screen bg-gray-50">
-                    {notification && <Notification />}
+                    {notification && <Notification notification={notification} setNotification={setNotification} />}
                     
-                    {/* Header */}
-                    <header className="bg-white shadow-sm border-b">
-                        <div className="max-w-7xl mx-auto px-4 py-4">
-                            <div className="flex justify-between items-center">
-                                <div className="flex items-center">
-                                    <i className="fas fa-industry text-2xl text-blue-600 mr-3"></i>
-                                    <div>
-                                        <h1 className="text-2xl font-bold text-gray-800">
-                                            Plataforma DDP
-                                            {state.hasChanges && (
-                                                <span className="ml-2 text-sm text-orange-500 font-normal">
-                                                    • {state.pendingChanges.length} cambios sin guardar
-                                                </span>
-                                            )}
-                                        </h1>
-                                        <p className="text-sm text-gray-600">
-                                            {syncing ? (
-                                                <span className="text-blue-600">
-                                                    <i className="fas fa-sync loading-spinner mr-1"></i>
-                                                    Sincronizando...
-                                                </span>
-                                            ) : lastSync ? (
-                                                <>🟢 Última sincronización: {lastSync.toLocaleTimeString()}</>
-                                            ) : (
-                                                <>⚪ Sin sincronizar</>
-                                            )}
-                                        </p>
-                                    </div>
-                                </div>
-                                
-                                <div className="flex items-center gap-3">
-                                    {/* Auto-sync toggle */}
-                                    <label className="flex items-center cursor-pointer">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={autoSync} 
-                                            onChange={(e) => setAutoSync(e.target.checked)}
-                                            className="sr-only"
-                                        />
-                                        <div className={`relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in ${autoSync ? 'bg-blue-600' : 'bg-gray-300'} rounded-full`}>
-                                            <div className={`absolute block w-4 h-4 bg-white rounded-full transition-transform duration-200 ease-in ${autoSync ? 'translate-x-5' : 'translate-x-1'} top-1`}></div>
-                                        </div>
-                                        <span className="text-sm text-gray-700">Auto-sync</span>
-                                    </label>
-                                    
-                                    {/* Botones de acción */}
-                                    {state.hasChanges && (
-                                        <>
-                                            <button 
-                                                onClick={revertChanges} 
-                                                className="bg-gray-200 px-3 py-2 rounded hover:bg-gray-300 fast-transition"
-                                                title="Descartar cambios">
-                                                <i className="fas fa-undo"></i>
-                                            </button>
-                                            <button 
-                                                onClick={saveChanges} 
-                                                disabled={syncing}
-                                                className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50 flex items-center fast-transition">
-                                                <i className="fas fa-save mr-2"></i>
-                                                Guardar cambios ({state.pendingChanges.length})
-                                            </button>
-                                        </>
-                                    )}
-                                    
-                                    <button 
-                                        onClick={() => loadProjects(true)} 
-                                        disabled={syncing || state.hasChanges} 
-                                        className="bg-gray-200 px-3 py-2 rounded hover:bg-gray-300 disabled:opacity-50 fast-transition"
-                                        title={state.hasChanges ? 'Guarda los cambios primero' : 'Actualizar'}>
-                                        <i className="fas fa-sync-alt"></i>
-                                    </button>
-                                    
-                                    <button 
-                                        onClick={() => { setSelectedProject(null); setShowModal(true); }} 
-                                        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex items-center fast-transition">
-                                        <i className="fas fa-plus mr-2"></i>Nuevo
-                                    </button>
-                                </div>
-                            </div>
+                    {/* HEADER */}
+                    <header className="bg-white shadow-sm border-b px-4 py-3 flex justify-between items-center">
+                        <div className="flex items-center">
+                            <i className="fas fa-industry text-2xl text-blue-600 mr-3"></i>
+                            <h1 className="text-xl font-bold text-gray-800">Plataforma DDP</h1>
                         </div>
+                        <button onClick={() => { setSelectedProject(null); setShowModal(true); }} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                            <i className="fas fa-plus mr-2"></i>Nueva Solicitud
+                        </button>
                     </header>
 
-                    {/* Tabs de navegación */}
-                    <div className="bg-white border-b">
-                        <div className="max-w-7xl mx-auto px-4">
-                            <div className="flex space-x-8">
-                                {[
-                                    {id: 'dashboard', label: 'Dashboard', icon: 'fas fa-chart-pie'},
-                                    {id: 'kanban', label: 'Kanban', icon: 'fas fa-columns'},
-                                    {id: 'table', label: 'Tabla', icon: 'fas fa-table'}
-                                ].map(tab => (
-                                    <button 
-                                        key={tab.id} 
-                                        onClick={() => setView(tab.id)} 
-                                        className={`py-3 px-1 border-b-2 font-medium text-sm fast-transition ${
-                                            view === tab.id 
-                                                ? 'border-blue-600 text-blue-600' 
-                                                : 'border-transparent text-gray-500 hover:text-gray-700'
-                                        }`}>
-                                        <i className={`${tab.icon} mr-2`}></i>{tab.label}
-                                    </button>
-                                ))}
-                            </div>
+                    {/* NAV */}
+                    <div className="bg-white border-b px-4">
+                        <div className="flex space-x-6">
+                            {[
+                                {id: 'dashboard', label: 'Dashboard', icon: 'fas fa-chart-pie'},
+                                {id: 'kanban', label: 'Kanban', icon: 'fas fa-columns'},
+                                {id: 'handloom', label: 'Handloom Gantt', icon: 'fas fa-stream'}, // <--- NUEVO BOTÓN
+                                {id: 'table', label: 'Tabla', icon: 'fas fa-table'}
+                            ].map(tab => (
+                                <button key={tab.id} onClick={() => setView(tab.id)}
+                                    className={`py-3 border-b-2 font-medium text-sm ${view === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}`}>
+                                    <i className={`${tab.icon} mr-2`}></i>{tab.label}
+                                </button>
+                            ))}
                         </div>
                     </div>
 
-                    {/* Filtros */}
-                    <div className="max-w-7xl mx-auto px-4 py-4">
-                        <div className="bg-white rounded-lg shadow p-4">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium mb-1">Buscar</label>
-                                    <div className="relative">
-                                        <input 
-                                            type="text" 
-                                            value={searchTerm} 
-                                            onChange={(e) => setSearchTerm(e.target.value)} 
-                                            placeholder="Buscar proyecto o cliente..." 
-                                            className="w-full pl-10 pr-3 py-2 border rounded focus:ring-2 focus:ring-blue-500 fast-transition" 
-                                        />
-                                        <i className="fas fa-search absolute left-3 top-3 text-gray-400"></i>
-                                    </div>
-                                </div>
-                                
-                                <div>
-                                    <label className="block text-sm font-medium mb-1">Cliente</label>
-                                    <select 
-                                        value={filterCliente} 
-                                        onChange={(e) => setFilterCliente(e.target.value)} 
-                                        className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500 fast-transition">
-                                        <option value="">Todos los clientes</option>
-                                        {clientes.map(c => <option key={c} value={c}>{c}</option>)}
-                                    </select>
-                                </div>
-                                
-                                <div>
-                                    <label className="block text-sm font-medium mb-1">Estado</label>
-                                    <select 
-                                        value={filterEstado} 
-                                        onChange={(e) => setFilterEstado(e.target.value)} 
-                                        className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500 fast-transition">
-                                        <option value="">Todos los estados</option>
-                                        {Object.values(ESTADOS).map(e => <option key={e.label} value={e.label}>{e.label}</option>)}
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Contenido principal */}
-                    <main className="max-w-7xl mx-auto px-4 pb-8">
-                        {loading ? (
-                            <div className="flex justify-center items-center h-64">
-                                <div className="text-center">
-                                    <i className="fas fa-spinner loading-spinner text-4xl text-blue-600 mb-4"></i>
-                                    <p className="text-gray-600">Cargando proyectos...</p>
-                                </div>
-                            </div>
-                        ) : (
-                            <>
-                                {view === 'dashboard' && <DashboardView />}
-                                {view === 'kanban' && <KanbanView />}
-                                {view === 'table' && <TableView />}
-                            </>
+                    {/* CONTENIDO */}
+                    <main className="p-4">
+                        {view === 'dashboard' && <DashboardView projects={projects} />}
+                        {view === 'kanban' && <div className="text-center py-10 text-gray-500">Vista Kanban (Integrar código previo)</div>}
+                        {view === 'table' && <div className="text-center py-10 text-gray-500">Vista Tabla (Integrar código previo)</div>}
+                        
+                        {/* VISTA GANTT */}
+                        {view === 'handloom' && (
+                            <HandloomView projects={projects} onUpdateProject={saveProject} />
                         )}
                     </main>
 
-                    {/* Modal */}
-                    {showModal && <ProjectModal />}
+                    {showModal && <ProjectModal selectedProject={selectedProject} setShowModal={setShowModal} saveProject={saveProject} />}
                 </div>
             );
         }
 
-        // Renderizar aplicación
-        ReactDOM.render(<App />, document.getElementById('root'));
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
