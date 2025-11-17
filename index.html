@@ -12,7 +12,7 @@
     
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; }
         
         .loading-spinner { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -26,11 +26,10 @@
         .drop-zone { transition: all 0.2s ease; min-height: 100px; }
         .drop-zone.drag-over { background-color: rgba(59, 130, 246, 0.1); border: 2px dashed #3b82f6; }
         
-        /* Patrón de cuadrícula para el Gantt (Estilo WeaveFlow) */
+        /* Patrón de cuadrícula para el Gantt */
         .bg-grid-pattern {
-            background-image: linear-gradient(to right, #f3f4f6 1px, transparent 1px),
-                              linear-gradient(to bottom, #f3f4f6 1px, transparent 1px);
-            background-size: 120px 100%;
+            background-image: linear-gradient(to right, #e5e7eb 1px, transparent 1px);
+            background-size: 120px 100%; /* Coincide con cellWidth */
         }
         
         .fast-transition { transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -43,184 +42,120 @@
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef, useReducer } = React;
 
-        // ============================================
-        // CONFIGURACIÓN Y DATOS FALSOS (MOCK)
-        // ============================================
-        const GOOGLE_SCRIPT_URL = 'TU_URL_DEL_SCRIPT_AQUI'; // Reemplaza con tu URL real
+        // Reemplaza con tu URL de Apps Script publicada
+        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwDNDbWX2X0E5WL1hh93I86RJ5ErarK9J2yd3q7dUdhoy4OSbkQBcQvtMD3j6Jm3ZKC4g/exec';
         
         const ESTADOS = {
-            CREADO: { label: "CREADO", color: "bg-gray-500", code: "10" },
-            EN_PROCESO: { label: "EN PROCESO", color: "bg-blue-500", code: "50" },
-            TEJIDO: { label: "TEJIDO", color: "bg-indigo-500", code: "60" },
-            FINALIZADO: { label: "FINALIZADO", color: "bg-green-500", code: "80" },
-            ANULADO: { label: "ANULADO", color: "bg-red-500", code: "90" }
+            CREADO: { label: "CREADO", color: "bg-gray-500" },
+            EN_PROCESO: { label: "EN PROCESO", color: "bg-blue-500" },
+            TEJIDO: { label: "TEJIDO", color: "bg-indigo-500" },
+            FINALIZADO: { label: "FINALIZADO", color: "bg-green-500" },
+            ANULADO: { label: "ANULADO", color: "bg-red-500" }
         };
 
-        // Datos de ejemplo para probar sin backend
-        const INITIAL_DATA = [
-            { id: '1', nombre: 'BASE SHORT ROSADO', cliente: 'WOALLANCE', estado: 'TEJIDO', proceso: 'Tejido', hiloUrdimbre: '40/1 Tanguis', fechaProgramada: null },
-            { id: '2', nombre: 'CUADROS VICHY AZUL', cliente: 'GAP', estado: 'EN PROCESO', proceso: 'Ficha técnica', hiloUrdimbre: '50/1 Poly/Alg', fechaProgramada: null },
-            { id: '3', nombre: 'TELA ECOLOGICA', cliente: 'BCP', estado: 'TEJIDO', proceso: 'Muestras', hiloUrdimbre: '20/1 Reciclado', fechaProgramada: new Date().toISOString() }
-        ];
+        const PROCESOS = ["Ficha técnica", "Tejido", "Hoja de costo", "Acabado", "Recepción", "Muestras", "Aprobación cliente"];
 
-        // ============================================
-        // API SERVICE (Simulado para Demo)
-        // ============================================
+        // --- SERVICIO API ---
         class GoogleSheetsAPI {
             constructor(baseUrl) { this.baseUrl = baseUrl; }
-            // Aquí irían las llamadas reales fetch...
+            async request(action, data = {}) {
+                try {
+                    const response = await fetch(this.baseUrl, {
+                        method: 'POST',
+                        body: JSON.stringify({ action, ...data })
+                    });
+                    const result = await response.json();
+                    if (!result.success) throw new Error(result.error);
+                    return result;
+                } catch (error) {
+                    console.error(error);
+                    throw error;
+                }
+            }
+            async getProjects() { return this.request('getProjects'); }
+            async createProject(project) { return this.request('createProject', { project }); }
+            async updateProject(id, project) { return this.request('updateProject', { id, project }); }
+            async deleteProject(id) { return this.request('deleteProject', { id }); }
         }
+        const api = new GoogleSheetsAPI(GOOGLE_SCRIPT_URL);
 
-        // ============================================
-        // COMPONENTE: NOTIFICACIÓN
-        // ============================================
+        // --- COMPONENTES ---
+
         const Notification = ({ notification, setNotification }) => {
-            useEffect(() => {
-                const timer = setTimeout(() => setNotification(null), 3000);
-                return () => clearTimeout(timer);
-            }, []);
-
-            const bgColor = notification.type === 'success' ? 'bg-green-500' 
-                : notification.type === 'error' ? 'bg-red-500' : 'bg-blue-500';
-
-            return (
-                <div className={`fixed top-20 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50`}
-                     style={{ animation: 'slideIn 0.3s ease' }}>
-                    <span>{notification.message}</span>
-                </div>
-            );
+            useEffect(() => { const t = setTimeout(() => setNotification(null), 3000); return () => clearTimeout(t); }, []);
+            const color = notification.type === 'success' ? 'bg-green-500' : 'bg-red-500';
+            return <div className={`fixed top-20 right-4 ${color} text-white px-6 py-3 rounded shadow-lg z-50 animate-slideIn`}>{notification.message}</div>;
         };
 
-        // ============================================
-        // COMPONENTE: MODAL DETALLADO (NUEVO)
-        // ============================================
+        // MODAL DETALLADO (TU VERSIÓN MEJORADA)
         const ProjectModal = ({ selectedProject, setShowModal, saveProject }) => {
             const [formData, setFormData] = useState(selectedProject || {
-                area: "COMERCIAL",
-                solicitante: "",
-                cliente: "",
-                fechaRequerida: new Date().toISOString().split('T')[0],
-                usoFinal: "Camisa",
-                acabado: "",
-                acabadoPrenda: "",
-                articuloBase: "",
-                nombre: "", // Diseño/Nombre
-                combinacion: "",
-                anchoAcabado: "",
-                pesoAcabado: "",
-                otros: "",
-                hiloUrdimbre: "",
-                hiloTrama: "",
-                estado: "CREADO",
-                proceso: "Ficha técnica"
+                area: "COMERCIAL", solicitante: "", cliente: "", fechaRequerida: new Date().toISOString().split('T')[0],
+                usoFinal: "Camisa", acabado: "", acabadoPrenda: "", articuloBase: "", nombre: "", combinacion: "",
+                anchoAcabado: "150", pesoAcabado: "", hiloUrdimbre: "", hiloTrama: "", composicion: "",
+                estado: "CREADO", proceso: "Ficha técnica", observaciones: ""
             });
 
-            const handleChange = (field, value) => {
-                setFormData(prev => ({ ...prev, [field]: value }));
-            };
+            const handleChange = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
 
             return (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 modal-overlay" 
-                     onClick={(e) => e.target === e.currentTarget && setShowModal(false)}>
-                    
-                    <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-fadeIn">
-                        {/* Header */}
-                        <div className="sticky top-0 bg-slate-800 text-white px-6 py-4 flex justify-between items-center z-10">
-                            <h2 className="text-xl font-bold flex items-center gap-2">
-                                <i className="fas fa-file-signature"></i>
-                                {selectedProject ? 'Editar Solicitud' : 'Nueva Solicitud de Desarrollo'}
-                            </h2>
-                            <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white transition">
-                                <i className="fas fa-times text-xl"></i>
-                            </button>
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowModal(false)}>
+                    <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="sticky top-0 bg-blue-800 text-white px-6 py-4 flex justify-between items-center z-10">
+                            <h2 className="text-xl font-bold"><i className="fas fa-file-signature mr-2"></i>{selectedProject ? 'Editar Solicitud' : 'Nueva Solicitud'}</h2>
+                            <button onClick={() => setShowModal(false)} className="text-white"><i className="fas fa-times"></i></button>
                         </div>
-                        
-                        <form onSubmit={(e) => { e.preventDefault(); saveProject(formData); }} className="p-6 bg-gray-50">
-                            
-                            {/* 1. Datos Generales */}
-                            <div className="bg-white p-4 rounded shadow-sm border border-gray-200 mb-4">
-                                <h3 className="text-sm font-bold text-blue-800 uppercase mb-3 border-b pb-1">Datos Generales</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-500 uppercase">Área</label>
-                                        <select className="w-full p-2 border rounded bg-gray-50"
-                                            value={formData.area} onChange={e => handleChange('area', e.target.value)}>
+                        <form onSubmit={(e) => { e.preventDefault(); saveProject(formData); }} className="p-6 bg-gray-50 space-y-4">
+                            {/* BLOQUE 1: DATOS GENERALES */}
+                            <div className="bg-white p-4 rounded shadow border">
+                                <h3 className="text-sm font-bold text-blue-800 border-b pb-2 mb-3">DATOS GENERALES</h3>
+                                <div className="grid grid-cols-4 gap-4">
+                                    <div><label className="text-xs font-bold block text-gray-500">Área</label>
+                                        <select className="w-full border rounded p-2" value={formData.area} onChange={e=>handleChange('area', e.target.value)}>
                                             <option>COMERCIAL</option><option>DISEÑO</option><option>PRODUCCIÓN</option>
                                         </select>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-500 uppercase">Solicitante</label>
-                                        <input type="text" className="w-full p-2 border rounded" value={formData.solicitante} onChange={e => handleChange('solicitante', e.target.value)} />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-500 uppercase">Cliente Final</label>
-                                        <input type="text" className="w-full p-2 border rounded" value={formData.cliente} onChange={e => handleChange('cliente', e.target.value)} />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-500 uppercase">Fecha Req.</label>
-                                        <input type="date" className="w-full p-2 border rounded" value={formData.fechaRequerida} onChange={e => handleChange('fechaRequerida', e.target.value)} />
-                                    </div>
+                                    <div><label className="text-xs font-bold block text-gray-500">Solicitante</label><input className="w-full border rounded p-2" value={formData.solicitante} onChange={e=>handleChange('solicitante', e.target.value)} /></div>
+                                    <div><label className="text-xs font-bold block text-gray-500">Cliente Final *</label><input className="w-full border rounded p-2" required value={formData.cliente} onChange={e=>handleChange('cliente', e.target.value)} /></div>
+                                    <div><label className="text-xs font-bold block text-gray-500">Fecha Req.</label><input type="date" className="w-full border rounded p-2" value={formData.fechaRequerida} onChange={e=>handleChange('fechaRequerida', e.target.value)} /></div>
                                 </div>
                             </div>
-
-                            {/* 2. Especificaciones */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                                <div className="bg-white p-4 rounded shadow-sm border border-gray-200">
+                            {/* BLOQUE 2: ESPECIFICACIONES */}
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="bg-white p-4 rounded shadow border">
                                     <h3 className="text-sm font-bold text-gray-700 mb-3">Definición</h3>
-                                    <div className="space-y-3">
-                                        <div>
-                                            <label className="block text-xs text-gray-500">Uso Final</label>
-                                            <select className="w-full p-2 border rounded" value={formData.usoFinal} onChange={e => handleChange('usoFinal', e.target.value)}>
-                                                <option>Camisa</option><option>Pantalón</option><option>Otro</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs text-gray-500">Acabado</label>
-                                            <input type="text" className="w-full p-2 border rounded" value={formData.acabado} onChange={e => handleChange('acabado', e.target.value)}/>
-                                        </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs block">Uso Final</label>
+                                        <select className="w-full border rounded p-2" value={formData.usoFinal} onChange={e=>handleChange('usoFinal', e.target.value)}>
+                                            <option>Camisa</option><option>Pantalón</option><option>Otro</option>
+                                        </select>
+                                        <label className="text-xs block">Acabado</label><input className="w-full border rounded p-2" value={formData.acabado} onChange={e=>handleChange('acabado', e.target.value)} />
                                     </div>
                                 </div>
-
-                                <div className="md:col-span-2 bg-white p-4 rounded shadow-sm border border-gray-200">
+                                <div className="col-span-2 bg-white p-4 rounded shadow border">
                                     <h3 className="text-sm font-bold text-gray-700 mb-3">Ficha Técnica</h3>
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs font-bold text-blue-600">ARTÍCULO BASE</label>
-                                            <input type="text" className="w-full p-2 border-b-2 border-blue-200 bg-blue-50" required value={formData.articuloBase} onChange={e => handleChange('articuloBase', e.target.value)}/>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-blue-600">NOMBRE DISEÑO</label>
-                                            <input type="text" className="w-full p-2 border-b-2 border-blue-200 bg-blue-50" required value={formData.nombre} onChange={e => handleChange('nombre', e.target.value)}/>
-                                        </div>
+                                        <div><label className="text-xs font-bold text-blue-600">ARTÍCULO BASE</label><input className="w-full border-b-2 border-blue-200 bg-blue-50 p-2" value={formData.articuloBase} onChange={e=>handleChange('articuloBase', e.target.value)} /></div>
+                                        <div><label className="text-xs font-bold text-blue-600">NOMBRE DISEÑO *</label><input className="w-full border-b-2 border-blue-200 bg-blue-50 p-2" required value={formData.nombre} onChange={e=>handleChange('nombre', e.target.value)} /></div>
                                         <div className="grid grid-cols-2 gap-2">
-                                            <input type="number" className="w-full p-2 border rounded" placeholder="Ancho (m)" value={formData.anchoAcabado} onChange={e => handleChange('anchoAcabado', e.target.value)}/>
-                                            <input type="number" className="w-full p-2 border rounded" placeholder="Peso (g)" value={formData.pesoAcabado} onChange={e => handleChange('pesoAcabado', e.target.value)}/>
+                                            <input type="number" placeholder="Ancho (cm)" className="border rounded p-2" value={formData.anchoAcabado} onChange={e=>handleChange('anchoAcabado', e.target.value)} />
+                                            <input type="number" placeholder="Peso (g)" className="border rounded p-2" value={formData.pesoAcabado} onChange={e=>handleChange('pesoAcabado', e.target.value)} />
                                         </div>
-                                        <input type="text" className="w-full p-2 border rounded" placeholder="Combinación" value={formData.combinacion} onChange={e => handleChange('combinacion', e.target.value)}/>
+                                        <input placeholder="Combinación" className="border rounded p-2" value={formData.combinacion} onChange={e=>handleChange('combinacion', e.target.value)} />
                                     </div>
                                 </div>
                             </div>
-
-                            {/* 3. Hilado */}
-                            <div className="bg-white p-4 rounded shadow-sm border border-gray-200 mb-6">
+                            {/* BLOQUE 3: HILADO */}
+                            <div className="bg-white p-4 rounded shadow border">
                                 <h3 className="text-sm font-bold text-gray-700 mb-3">Hilado</h3>
-                                <div className="grid grid-cols-2 gap-6">
-                                    <div className="flex items-center gap-3">
-                                        <i className="fas fa-arrow-down text-gray-400"></i>
-                                        <input type="text" className="w-full p-2 border-b" placeholder="Urdimbre" value={formData.hiloUrdimbre} onChange={e => handleChange('hiloUrdimbre', e.target.value)}/>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <i className="fas fa-arrow-right text-gray-400"></i>
-                                        <input type="text" className="w-full p-2 border-b" placeholder="Trama" value={formData.hiloTrama} onChange={e => handleChange('hiloTrama', e.target.value)}/>
-                                    </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div><label className="text-xs font-bold">URDIMBRE</label><input className="w-full border-b p-2" placeholder="Ej: 40/1" value={formData.hiloUrdimbre} onChange={e=>handleChange('hiloUrdimbre', e.target.value)} /></div>
+                                    <div><label className="text-xs font-bold">TRAMA</label><input className="w-full border-b p-2" placeholder="Ej: 50/1" value={formData.hiloTrama} onChange={e=>handleChange('hiloTrama', e.target.value)} /></div>
                                 </div>
                             </div>
-
-                            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-                                <button type="button" onClick={() => setShowModal(false)} className="px-6 py-2 rounded border bg-white">Cancelar</button>
-                                <button type="submit" className="px-8 py-2 rounded bg-blue-700 text-white font-bold hover:bg-blue-800">
-                                    <i className="fas fa-paper-plane mr-2"></i>Guardar
-                                </button>
+                            <div className="flex justify-end gap-2 pt-4">
+                                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border rounded">Cancelar</button>
+                                <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Guardar</button>
                             </div>
                         </form>
                     </div>
@@ -228,110 +163,113 @@
             );
         };
 
-        // ============================================
-        // COMPONENTE: GANTT HANDLOOM (NUEVO)
-        // ============================================
-        const HandloomView = ({ projects, onUpdateProject }) => {
+        // GANTT HANDLOOM (1 SOLO TELAR)
+        const HandloomView = ({ projects, onUpdateProject, showNotification }) => {
             const daysToShow = 14;
             const cellWidth = 120;
             const today = new Date();
+            today.setHours(0,0,0,0);
             
-            const dates = useMemo(() => {
-                return Array.from({ length: daysToShow }).map((_, i) => {
-                    const d = new Date();
-                    d.setDate(today.getDate() + i);
-                    return d;
-                });
-            }, []);
+            const dates = useMemo(() => Array.from({length: daysToShow}).map((_, i) => {
+                const d = new Date(today); d.setDate(today.getDate() + i); return d;
+            }), []);
 
-            // Filtro: Proyectos que están en etapa Tejido/Muestras y NO tienen fecha
+            // Backlog: Proyectos en estado "Tejido" o "En Proceso" SIN fecha
             const backlogProjects = projects.filter(p => 
-                (p.estado === 'TEJIDO' || p.proceso === 'Muestras' || p.proceso === 'Tejido') && !p.fechaProgramada
+                (p.estado === 'TEJIDO' || p.estado === 'EN PROCESO' || p.proceso === 'Tejido') && !p.fechaProgramada
             );
 
-            // Proyectos con fecha
+            // Proyectos Programados: Solo los que tienen fecha
             const scheduledProjects = projects.filter(p => p.fechaProgramada).map(p => {
-                const start = new Date(p.fechaProgramada);
-                const diffTime = start - today; // Puede ser negativo si es pasado
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-                // Solo mostramos si está dentro del rango visible (aprox)
-                const offset = diffDays * cellWidth;
-                return { ...p, offset, duration: 2 }; // Duración fija 2 días para demo
+                const start = new Date(p.fechaProgramada); start.setHours(0,0,0,0);
+                const diffDays = Math.floor((start - today) / (1000 * 60 * 60 * 24));
+                return { ...p, offset: diffDays * cellWidth, duration: 2 }; // Duración 2 días por defecto
             });
-
-            const handleDragStart = (e, project) => {
-                e.dataTransfer.setData('projectId', project.id);
-            };
 
             const handleDropOnDay = (e, date) => {
                 e.preventDefault();
                 const projectId = e.dataTransfer.getData('projectId');
                 const project = projects.find(p => p.id.toString() === projectId);
-                
                 if (project) {
-                    onUpdateProject({
-                        ...project,
-                        fechaProgramada: date.toISOString(),
-                        proceso: 'Tejido',
-                        estado: 'TEJIDO'
-                    });
+                    onUpdateProject({ ...project, fechaProgramada: date.toISOString(), estado: 'TEJIDO', proceso: 'Tejido' });
+                    showNotification(`${project.nombre} programado el ${date.toLocaleDateString()}`, 'success');
                 }
             };
 
+            const handleRemoveSchedule = (p) => {
+                onUpdateProject({ ...p, fechaProgramada: null });
+                showNotification(`${p.nombre} devuelto a cola`, 'info');
+            };
+
             return (
-                <div className="flex h-[calc(100vh-140px)] bg-gray-100 overflow-hidden border-t border-gray-300">
-                    {/* BACKLOG */}
-                    <div className="w-80 bg-white border-r border-gray-200 flex flex-col shadow-md z-10">
-                        <div className="p-4 bg-slate-800 text-white flex justify-between items-center">
-                            <h3 className="font-bold"><i className="fas fa-list-ul mr-2"></i>Cola de Espera</h3>
-                            <span className="bg-blue-500 text-xs px-2 py-1 rounded-full">{backlogProjects.length}</span>
+                <div className="flex h-[calc(100vh-160px)] bg-gray-100 border-t border-gray-300">
+                    {/* COLA DE ESPERA (BACKLOG) */}
+                    <div className="w-72 bg-white border-r flex flex-col shadow-md z-10">
+                        <div className="p-3 bg-slate-800 text-white flex justify-between items-center">
+                            <h3 className="font-bold text-sm uppercase">Cola de Pedidos</h3>
+                            <span className="bg-blue-600 text-xs px-2 rounded-full">{backlogProjects.length}</span>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50">
+                        <div className="flex-1 overflow-y-auto p-2 space-y-2 bg-gray-50">
                             {backlogProjects.map(p => (
-                                <div key={p.id} draggable onDragStart={(e) => handleDragStart(e, p)}
-                                     className="bg-white p-3 rounded-l border-l-4 border-blue-500 shadow-sm hover:shadow-md cursor-move">
-                                    <div className="font-bold text-sm">{p.nombre}</div>
+                                <div key={p.id} draggable onDragStart={e => e.dataTransfer.setData('projectId', p.id)}
+                                     className="bg-white p-3 rounded border-l-4 border-blue-500 shadow-sm cursor-move hover:shadow-md">
+                                    <div className="font-bold text-sm text-gray-800">{p.nombre}</div>
                                     <div className="text-xs text-gray-500">{p.cliente}</div>
-                                    <div className="mt-1 text-[10px] bg-gray-100 inline-block px-1 rounded">{p.hiloUrdimbre || 'Sin hilado'}</div>
+                                    {p.hiloUrdimbre && <div className="mt-1 text-[10px] bg-gray-100 px-1 rounded inline-block">{p.hiloUrdimbre}</div>}
                                 </div>
                             ))}
-                            {backlogProjects.length === 0 && <div className="text-center text-gray-400 mt-4 text-sm">Vacío</div>}
+                            {backlogProjects.length === 0 && <div className="text-center text-gray-400 mt-4 text-xs">No hay pedidos pendientes</div>}
                         </div>
                     </div>
 
-                    {/* GANTT */}
+                    {/* GANTT DE UN SOLO TELAR */}
                     <div className="flex-1 flex flex-col bg-white overflow-x-auto">
-                        <div className="flex bg-gray-50 border-b h-12 sticky top-0 min-w-max z-20">
-                            <div className="w-40 flex-shrink-0 bg-slate-800 text-white flex items-center justify-center font-bold text-sm">TELAR</div>
-                            {dates.map((date, i) => (
-                                <div key={i} className={`flex-shrink-0 border-r flex flex-col items-center justify-center text-xs ${date.getDay()===0||date.getDay()===6?'bg-gray-100':''}`} style={{ width: cellWidth }}>
-                                    <span className="font-bold">{date.getDate()}</span>
-                                    <span className="text-[10px]">{date.toLocaleDateString('es-ES', { weekday: 'short' })}</span>
+                        {/* Encabezado Fechas */}
+                        <div className="flex h-10 border-b bg-gray-50 min-w-max sticky top-0 z-20">
+                            <div className="w-40 flex-shrink-0 bg-slate-800 text-white flex items-center justify-center text-xs font-bold">HANDLOOM #1</div>
+                            {dates.map((d, i) => (
+                                <div key={i} className={`flex-shrink-0 border-r flex flex-col items-center justify-center text-xs ${d.getDay()===0||d.getDay()===6?'bg-gray-200':''}`} style={{width: cellWidth}}>
+                                    <span className="font-bold">{d.getDate()}</span>
+                                    <span className="text-[9px]">{d.toLocaleDateString('es-ES',{weekday:'short'})}</span>
                                 </div>
                             ))}
                         </div>
-
+                        
+                        {/* Carril del Telar (Cuerpo) */}
                         <div className="flex-1 relative min-w-max bg-grid-pattern">
-                            <div className="flex h-24 border-b border-gray-200">
-                                <div className="w-40 flex-shrink-0 bg-white border-r flex items-center justify-center sticky left-0 z-10">
-                                    <div className="text-center">
-                                        <div className="font-bold text-blue-900">HANDLOOM #1</div>
-                                        <div className="text-xs text-green-600">Activo</div>
-                                    </div>
+                            <div className="flex h-full">
+                                {/* Etiqueta Fija Izquierda */}
+                                <div className="w-40 flex-shrink-0 bg-white border-r flex flex-col items-center pt-4 sticky left-0 z-10 shadow-sm">
+                                    <div className="font-bold text-blue-900">TELAR ÚNICO</div>
+                                    <div className="text-xs text-green-600 mt-1">● Operativo</div>
                                 </div>
-                                <div className="relative flex">
-                                    {dates.map((date, i) => (
-                                        <div key={i} onDragOver={e => e.preventDefault()} onDrop={(e) => handleDropOnDay(e, date)}
-                                             className="border-r border-gray-100 h-full hover:bg-blue-50" style={{ width: cellWidth }}></div>
-                                    ))}
-                                    {scheduledProjects.map(p => (
-                                        <div key={p.id} className="absolute top-2 h-20 rounded shadow-md bg-blue-600 text-white p-2 cursor-pointer hover:scale-[1.02] z-10 overflow-hidden"
-                                             style={{ left: p.offset, width: p.duration * cellWidth - 4, marginLeft: 2 }}
-                                             onClick={() => alert(p.nombre)}>
-                                            <div className="font-bold text-xs truncate">{p.cliente}</div>
-                                            <div className="font-bold text-sm mt-1 truncate">{p.nombre}</div>
+                                
+                                {/* Área de Drop */}
+                                <div className="relative flex h-full">
+                                    {dates.map((d, i) => (
+                                        <div key={i} 
+                                             onDragOver={e => e.preventDefault()} 
+                                             onDrop={e => handleDropOnDay(e, d)}
+                                             className="h-full border-r border-transparent hover:bg-blue-50 transition-colors" 
+                                             style={{width: cellWidth}}>
                                         </div>
                                     ))}
+
+                                    {/* Tarjetas Programadas */}
+                                    {scheduledProjects.map(p => {
+                                        if (p.offset < 0 || p.offset > daysToShow * cellWidth) return null;
+                                        return (
+                                            <div key={p.id} 
+                                                 className="absolute top-4 h-24 rounded bg-blue-600 text-white p-2 shadow-md cursor-pointer hover:bg-blue-700 z-10"
+                                                 style={{left: p.offset, width: (p.duration * cellWidth) - 4, marginLeft: 2}}
+                                                 onDoubleClick={() => handleRemoveSchedule(p)}>
+                                                <div className="font-bold text-xs truncate">{p.cliente}</div>
+                                                <div className="font-bold text-sm mt-1 leading-tight">{p.nombre}</div>
+                                                <div className="text-[10px] mt-2 opacity-80 truncate">{p.hiloUrdimbre || 'N/A'}</div>
+                                                <div className="absolute top-1 right-1 text-[9px] opacity-50 cursor-pointer" title="Doble click para quitar">✕</div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         </div>
@@ -340,82 +278,106 @@
             );
         };
 
-        // ============================================
-        // VISTAS SIMPLES (Dashboard, Kanban, Tabla)
-        // ============================================
-        const DashboardView = ({ projects }) => (
-            <div className="grid grid-cols-4 gap-4">
-                <div className="bg-white p-6 rounded shadow"><h3 className="text-gray-500">Total</h3><p className="text-3xl font-bold">{projects.length}</p></div>
-                <div className="bg-white p-6 rounded shadow"><h3 className="text-gray-500">En Tejeduría</h3><p className="text-3xl font-bold text-blue-600">{projects.filter(p => p.estado === 'TEJIDO').length}</p></div>
-            </div>
-        );
-
-        // ============================================
-        // APP PRINCIPAL
-        // ============================================
+        // --- APP PRINCIPAL ---
         function App() {
-            const [projects, setProjects] = useState(INITIAL_DATA);
+            const [projects, setProjects] = useState([]);
             const [view, setView] = useState('dashboard');
             const [showModal, setShowModal] = useState(false);
             const [selectedProject, setSelectedProject] = useState(null);
             const [notification, setNotification] = useState(null);
+            const [loading, setLoading] = useState(true);
 
-            const showNotification = (msg, type) => setNotification({ message: msg, type, id: Date.now() });
+            const showNotif = (msg, type) => setNotification({message: msg, type});
 
-            const saveProject = (projectData) => {
-                if (projectData.id) {
-                    setProjects(prev => prev.map(p => p.id === projectData.id ? projectData : p));
-                    showNotification('Actualizado', 'success');
-                } else {
-                    const newP = { ...projectData, id: Date.now().toString(), estado: 'CREADO' };
-                    setProjects(prev => [...prev, newP]);
-                    showNotification('Creado', 'success');
-                }
+            // Cargar datos
+            useEffect(() => {
+                api.getProjects().then(res => {
+                    setProjects(res.projects);
+                    setLoading(false);
+                }).catch(() => setLoading(false));
+            }, []);
+
+            const saveProject = async (data) => {
+                // Optimistic UI update
+                const isNew = !data.id;
+                const tempId = isNew ? Date.now().toString() : data.id;
+                const newP = { ...data, id: tempId };
+                
+                setProjects(prev => isNew ? [...prev, newP] : prev.map(p => p.id === tempId ? newP : p));
                 setShowModal(false);
-                setSelectedProject(null);
+                
+                try {
+                    if (isNew) await api.createProject(data);
+                    else await api.updateProject(data.id, data);
+                    showNotif('Guardado correctamente', 'success');
+                    // Recargar real ID en background
+                    api.getProjects().then(res => setProjects(res.projects));
+                } catch (e) {
+                    showNotif('Error al guardar', 'error');
+                }
             };
 
             return (
-                <div className="min-h-screen bg-gray-50">
+                <div className="min-h-screen bg-gray-50 font-sans text-gray-800">
                     {notification && <Notification notification={notification} setNotification={setNotification} />}
                     
-                    {/* HEADER */}
-                    <header className="bg-white shadow-sm border-b px-4 py-3 flex justify-between items-center">
-                        <div className="flex items-center">
-                            <i className="fas fa-industry text-2xl text-blue-600 mr-3"></i>
-                            <h1 className="text-xl font-bold text-gray-800">Plataforma DDP</h1>
+                    <nav className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-sm">
+                        <div className="flex items-center gap-2 text-blue-700 font-bold text-xl">
+                            <i className="fas fa-industry"></i> Plataforma DDP
                         </div>
-                        <button onClick={() => { setSelectedProject(null); setShowModal(true); }} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-                            <i className="fas fa-plus mr-2"></i>Nueva Solicitud
+                        <button onClick={() => { setSelectedProject(null); setShowModal(true); }} 
+                                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium text-sm">
+                            + Nuevo Proyecto
                         </button>
-                    </header>
+                    </nav>
 
-                    {/* NAV */}
-                    <div className="bg-white border-b px-4">
-                        <div className="flex space-x-6">
+                    <div className="bg-white border-b px-6">
+                        <div className="flex gap-6">
                             {[
                                 {id: 'dashboard', label: 'Dashboard', icon: 'fas fa-chart-pie'},
                                 {id: 'kanban', label: 'Kanban', icon: 'fas fa-columns'},
-                                {id: 'handloom', label: 'Handloom Gantt', icon: 'fas fa-stream'}, // <--- NUEVO BOTÓN
+                                {id: 'handloom', label: 'Handloom Gantt', icon: 'fas fa-stream'},
                                 {id: 'table', label: 'Tabla', icon: 'fas fa-table'}
                             ].map(tab => (
-                                <button key={tab.id} onClick={() => setView(tab.id)}
-                                    className={`py-3 border-b-2 font-medium text-sm ${view === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}`}>
+                                <button key={tab.id} onClick={() => setView(tab.id)} 
+                                        className={`py-3 text-sm font-medium border-b-2 transition-colors ${view === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
                                     <i className={`${tab.icon} mr-2`}></i>{tab.label}
                                 </button>
                             ))}
                         </div>
                     </div>
 
-                    {/* CONTENIDO */}
-                    <main className="p-4">
-                        {view === 'dashboard' && <DashboardView projects={projects} />}
-                        {view === 'kanban' && <div className="text-center py-10 text-gray-500">Vista Kanban (Integrar código previo)</div>}
-                        {view === 'table' && <div className="text-center py-10 text-gray-500">Vista Tabla (Integrar código previo)</div>}
-                        
-                        {/* VISTA GANTT */}
-                        {view === 'handloom' && (
-                            <HandloomView projects={projects} onUpdateProject={saveProject} />
+                    <main className="p-6">
+                        {loading ? <div className="text-center py-20"><i className="fas fa-spinner fa-spin text-3xl text-blue-500"></i></div> : (
+                            <>
+                                {view === 'dashboard' && (
+                                    <div className="grid grid-cols-4 gap-4">
+                                        <div className="bg-white p-6 rounded shadow"><h3 className="text-gray-500 text-sm font-bold">TOTAL</h3><p className="text-4xl font-bold text-gray-800">{projects.length}</p></div>
+                                        <div className="bg-white p-6 rounded shadow"><h3 className="text-gray-500 text-sm font-bold">EN TEJIDO</h3><p className="text-4xl font-bold text-indigo-600">{projects.filter(p=>p.estado==='TEJIDO').length}</p></div>
+                                        <div className="bg-white p-6 rounded shadow"><h3 className="text-gray-500 text-sm font-bold">EN PROCESO</h3><p className="text-4xl font-bold text-blue-600">{projects.filter(p=>p.estado==='EN PROCESO').length}</p></div>
+                                    </div>
+                                )}
+                                {view === 'handloom' && <HandloomView projects={projects} onUpdateProject={saveProject} showNotification={showNotif} />}
+                                {view === 'table' && (
+                                    <div className="bg-white rounded shadow overflow-hidden">
+                                        <table className="w-full text-sm text-left">
+                                            <thead className="bg-gray-100 text-gray-600 font-bold"><tr><th className="p-3">Proyecto</th><th className="p-3">Cliente</th><th className="p-3">Estado</th><th className="p-3">Hilado</th><th className="p-3">Acción</th></tr></thead>
+                                            <tbody className="divide-y">
+                                                {projects.map(p => (
+                                                    <tr key={p.id} className="hover:bg-gray-50">
+                                                        <td className="p-3 font-medium">{p.nombre}</td>
+                                                        <td className="p-3">{p.cliente}</td>
+                                                        <td className="p-3"><span className={`px-2 py-1 rounded text-xs text-white ${ESTADOS[p.estado]?.color || 'bg-gray-400'}`}>{p.estado}</span></td>
+                                                        <td className="p-3 text-xs text-gray-500">{p.hiloUrdimbre}</td>
+                                                        <td className="p-3"><button onClick={()=>{setSelectedProject(p); setShowModal(true)}} className="text-blue-600 hover:underline">Editar</button></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                                {view === 'kanban' && <div className="text-center text-gray-400 py-10">Vista Kanban simplificada para esta demo</div>}
+                            </>
                         )}
                     </main>
 
