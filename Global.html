@@ -1,0 +1,32 @@
+<script type="text/babel">
+    // --- CONFIGURACIÓN ---
+    // Reemplaza esto con tu URL real del script publicado
+    const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwDNDbWX2X0E5WL1hh93I86RJ5ErarK9J2yd3q7dUdhoy4OSbkQBcQvtMD3j6Jm3ZKC4g/exec';
+
+    // --- API SERVICE ---
+    class GoogleSheetsAPI {
+        constructor(baseUrl) { this.baseUrl = baseUrl; }
+        async request(action, data = {}) {
+            try {
+                if (window.location.hostname === 'localhost') throw new Error("Mock");
+                const response = await fetch(this.baseUrl, { method: 'POST', body: JSON.stringify({ action, ...data }) });
+                return await response.json();
+            } catch (e) {
+                console.warn("Modo Offline/Mock");
+                return { success: true, projects: [] }; 
+            }
+        }
+        async getProjects() { return this.request('getProjects'); }
+        async createProject(project) { return this.request('createProject', { project }); }
+        async updateProject(id, project) { return this.request('updateProject', { id, project }); }
+        async deleteProject(id) { return this.request('deleteProject', { id }); }
+    }
+    const api = new GoogleSheetsAPI(GOOGLE_SCRIPT_URL);
+
+    // --- NOTIFICACIONES ---
+    const Notification = ({ notification, setNotification }) => {
+        React.useEffect(() => { const t = setTimeout(() => setNotification(null), 3000); return () => clearTimeout(t); }, []);
+        const color = notification.type === 'success' ? 'bg-green-500' : 'bg-blue-600';
+        return <div className={`fixed top-20 right-4 ${color} text-white px-6 py-3 rounded shadow-lg z-50 animate-in`}>{notification.message}</div>;
+    };
+</script>
