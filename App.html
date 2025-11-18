@@ -1,0 +1,75 @@
+<script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function App() {
+        const [view, setView] = useState('market'); // Vista inicial: Market
+        const [projects, setProjects] = useState([]);
+        const [notification, setNotification] = useState(null);
+
+        const showNotif = (msg, type) => setNotification({message: msg, type});
+
+        // Cargar datos
+        const loadData = () => {
+            api.getProjects().then(res => {
+                if(res.projects) setProjects(res.projects);
+            });
+        };
+
+        useEffect(() => { loadData(); }, []);
+
+        const handleOrderSubmit = async (order) => {
+            await api.createProject(order);
+            showNotif('Pedido Recibido', 'success');
+            loadData();
+            setView('admin'); 
+        };
+        
+        const handleUpdateProject = async (p) => {
+            // Actualización optimista
+            setProjects(prev => prev.map(item => item.id === p.id ? p : item));
+            await api.updateProject(p.id, p);
+        };
+
+        const handleDeleteProject = async (id) => {
+             if(confirm('¿Borrar?')) {
+                 await api.deleteProject(id);
+                 showNotif('Eliminado', 'success');
+                 loadData();
+             }
+        }
+
+        return (
+            <div className="min-h-screen flex flex-col">
+                {notification && <Notification notification={notification} setNotification={setNotification} />}
+                
+                {/* NAVBAR */}
+                <nav className="bg-white border-b px-6 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm">
+                    <div className="font-bold text-xl text-blue-700 flex items-center gap-2">
+                        <i className="fas fa-bolt text-yellow-400"></i> DDP Market
+                    </div>
+                    <div className="flex bg-gray-100 p-1 rounded-lg">
+                        <button onClick={() => setView('market')} className={`px-4 py-2 rounded text-sm transition ${view === 'market' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500'}`}>
+                            <i className="fas fa-store mr-2"></i>Pedir
+                        </button>
+                        <button onClick={() => setView('gantt')} className={`px-4 py-2 rounded text-sm transition ${view === 'gantt' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500'}`}>
+                            <i className="fas fa-stream mr-2"></i>Handloom
+                        </button>
+                        <button onClick={() => setView('admin')} className={`px-4 py-2 rounded text-sm transition ${view === 'admin' ? 'bg-white shadow text-blue-600 font-bold' : 'text-gray-500'}`}>
+                            <i className="fas fa-chart-pie mr-2"></i>Gestión
+                        </button>
+                    </div>
+                </nav>
+
+                {/* CONTENIDO */}
+                <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
+                    {view === 'market' && <MarketScreen onSubmitOrder={handleOrderSubmit} />}
+                    {view === 'gantt' && <GanttScreen projects={projects} onUpdateProject={handleUpdateProject} showNotification={showNotif} />}
+                    {view === 'admin' && <AdminScreen projects={projects} onDeleteProject={handleDeleteProject} />}
+                </main>
+            </div>
+        );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+</script>
