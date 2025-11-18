@@ -1,0 +1,85 @@
+<script type="text/babel">
+    const GanttScreen = ({ projects, onUpdateProject, showNotification }) => {
+        const daysToShow = 14;
+        const cellWidth = 120;
+        const today = new Date(); today.setHours(0,0,0,0);
+        
+        const dates = React.useMemo(() => Array.from({length: daysToShow}).map((_, i) => {
+            const d = new Date(today); d.setDate(today.getDate() + i); return d;
+        }), []);
+
+        const backlogProjects = projects.filter(p => 
+            (p.estado === 'TEJIDO' || p.proceso === 'Tejido' || p.proceso === 'Muestras') && !p.fechaProgramada
+        );
+        
+        const scheduledProjects = projects.filter(p => p.fechaProgramada).map(p => {
+            const start = new Date(p.fechaProgramada); start.setHours(0,0,0,0);
+            const diffDays = Math.floor((start - today) / (1000 * 60 * 60 * 24));
+            return { ...p, offset: diffDays * cellWidth, duration: 2 };
+        });
+
+        const handleDragStart = (e, id) => e.dataTransfer.setData('projectId', id);
+        
+        const handleDropOnDay = (e, date) => {
+            e.preventDefault();
+            const pid = e.dataTransfer.getData('projectId');
+            const project = projects.find(p => p.id.toString() === pid);
+            if(project) {
+                onUpdateProject({...project, fechaProgramada: date.toISOString(), estado: 'TEJIDO'});
+                showNotification(`Agendado para ${date.toLocaleDateString()}`, 'success');
+            }
+        };
+
+        return (
+            <div className="animate-in flex h-[600px] bg-gray-100 border rounded-lg overflow-hidden">
+                 {/* Cola */}
+                 <div className="w-72 bg-white border-r flex flex-col z-10 shadow-lg">
+                    <div className="p-4 bg-slate-800 text-white font-bold flex justify-between">
+                        <span>Cola de Tejido</span>
+                        <span className="bg-blue-500 px-2 rounded text-sm">{backlogProjects.length}</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-2 bg-gray-50">
+                        {backlogProjects.map(p => (
+                            <div key={p.id} draggable onDragStart={(e)=>handleDragStart(e, p.id)} className="bg-white p-3 rounded border-l-4 border-indigo-500 shadow-sm cursor-move hover:shadow-md">
+                                <div className="font-bold text-sm">{p.nombre}</div>
+                                <div className="text-xs text-gray-500">{p.cliente}</div>
+                            </div>
+                        ))}
+                    </div>
+                 </div>
+                 
+                 {/* Timeline */}
+                 <div className="flex-1 bg-white overflow-x-auto relative">
+                    <div className="flex h-12 border-b bg-gray-50 sticky top-0 z-20 min-w-max">
+                        <div className="w-40 flex-shrink-0 bg-slate-800 text-white flex items-center justify-center text-xs font-bold">HANDLOOM #1</div>
+                        {dates.map((d, i) => (
+                            <div key={i} className="flex-shrink-0 border-r flex flex-col items-center justify-center text-xs" style={{width: cellWidth}}>
+                                <span className="font-bold">{d.getDate()}</span>
+                                <span className="text-[10px]">{d.toLocaleDateString('es',{weekday:'short'})}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex h-full relative min-w-max bg-grid-pattern">
+                        <div className="w-40 flex-shrink-0 bg-white border-r flex flex-col items-center pt-4 sticky left-0 z-10 shadow-sm">
+                            <div className="font-bold text-blue-900">TELAR ÚNICO</div>
+                            <div className="text-xs text-green-600">● Activo</div>
+                        </div>
+                        <div className="relative flex h-full">
+                            {dates.map((d, i) => (
+                                <div key={i} onDragOver={e=>e.preventDefault()} onDrop={e=>handleDropOnDay(e, d)} className="h-full border-r border-transparent hover:bg-blue-50 transition-colors" style={{width: cellWidth}}></div>
+                            ))}
+                            {scheduledProjects.map(p => (
+                                <div key={p.id} className="absolute top-4 h-20 bg-indigo-600 text-white rounded p-2 shadow-lg hover:bg-indigo-700 cursor-pointer z-10 overflow-hidden"
+                                     style={{left: p.offset, width: (p.duration * cellWidth) - 4, marginLeft: 2}}
+                                     onClick={()=>onUpdateProject({...p, fechaProgramada: null})}>
+                                    <div className="text-xs font-bold">{p.cliente}</div>
+                                    <div className="text-sm truncate">{p.nombre}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                 </div>
+            </div>
+        );
+    };
+</script>
